@@ -3,6 +3,8 @@ services:
     image: "${IMAGE_NAME:-worldcup-tracker:local}"
     build:
       context: .
+      args:
+        APP_VERSION: "${APP_VERSION:-}"
     restart: unless-stopped
     ports:
       - "${APP_PORT:-8080}:8080"

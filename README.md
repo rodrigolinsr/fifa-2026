@@ -4,9 +4,20 @@ This app is a static HTML/CSS/JavaScript site served by Nginx.
 
 ## Cache Invalidation
 
-Nginx sends `Cache-Control: no-store` for HTML, CSS, and JavaScript files. That keeps deployments straightforward: when a new container version is released, browsers should request the newest app files instead of reusing stale cached ones.
+The Docker image build stamps `index.html` with a version query string for the local CSS and JavaScript files:
+
+```html
+styles.css?v=<version>
+app.js?v=<version>
+```
+
+In GitHub Actions, `<version>` is the commit SHA. In local Docker builds, it falls back to a build timestamp unless you pass `APP_VERSION` yourself.
+
+Nginx also sends `Cache-Control: no-store` for HTML, CSS, and JavaScript files. Together, this keeps deployments straightforward: when a new container version is released, browsers should request the newest app files instead of reusing stale cached ones.
 
 Image/font assets can still be cached for a short period because they are not the source of app logic.
+
+If a browser had already cached an older `index.html` from before this mechanism existed, it may need one hard reload. After that, new deployments should invalidate the CSS and JavaScript URLs automatically.
 
 ## Coolify
 
