@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>FIFA World Cup 2026 Tracker</title>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/lipis/flag-icons@7.3.2/css/flag-icons.min.css">
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="header-content">
+        <div class="header-copy">
+          <p class="eyebrow">Match Tracker</p>
+          <h1>FIFA World Cup 2026</h1>
+          <p class="intro-copy">
+            Enter scores as the tournament unfolds and the tables will update in this browser. Choose your timezone to see every kickoff in your local time. Your scores, theme, and timezone are saved only on this device, so they will not sync across browsers or devices.
+          </p>
+        </div>
+
+        <div class="header-actions">
+          <div class="theme-menu" id="themeMenu">
+            <button class="theme-toggle" id="themeToggle" type="button" aria-haspopup="true" aria-expanded="false">
+              <span class="theme-icon" id="themeIcon" aria-hidden="true"></span>
+              <span id="themeLabel">System</span>
+            </button>
+            <div class="theme-options" id="themeOptions" role="menu" hidden>
+              <button type="button" role="menuitemradio" data-theme-option="light">Light</button>
+              <button type="button" role="menuitemradio" data-theme-option="dark">Dark</button>
+              <button type="button" role="menuitemradio" data-theme-option="system">System</button>
+            </div>
+          </div>
+
+          <div class="timezone-panel" id="timezonePanel">
+            <label for="timezoneSelect">Timezone</label>
+            <div class="timezone-row">
+              <select id="timezoneSelect" aria-describedby="timezoneHint"></select>
+              <button class="button secondary" id="confirmTimezone" type="button">Confirm</button>
+            </div>
+            <p id="timezoneHint">Confirm your timezone to localize every kickoff.</p>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="page-shell">
+      <section class="toolbar" aria-label="Match filters">
+        <div class="field">
+          <label for="searchInput">Search</label>
+          <input id="searchInput" type="search" placeholder="Team, city, group, match number">
+        </div>
+        <div class="field compact">
+          <label for="stageFilter">View</label>
+          <select id="stageFilter"></select>
+        </div>
+        <button class="button danger" id="resetScores" type="button">Reset scores</button>
+      </section>
+
+      <section class="summary-strip" aria-label="Tournament summary">
+        <div>
+          <span id="matchCount">104</span>
+          <small>matches</small>
+        </div>
+        <div>
+          <span>48</span>
+          <small>teams</small>
+        </div>
+        <div>
+          <span>16</span>
+          <small>host cities</small>
+        </div>
+      </section>
+
+      <section class="groups-panel" aria-labelledby="groupsTitle">
+        <div class="section-heading">
+          <div>
+            <h2 id="groupsTitle">Group Stage</h2>
+            <p>Top two advance. The eight best third-placed teams also reach the Round of 32.</p>
+          </div>
+          <p id="emptyState" hidden>No matches found.</p>
+        </div>
+        <div class="groups-grid" id="groupsGrid"></div>
+      </section>
+
+      <section class="matches-panel" aria-labelledby="matchesTitle">
+        <div class="section-heading">
+          <h2 id="matchesTitle">Knockout Rounds</h2>
+        </div>
+        <div id="matchesContainer"></div>
+      </section>
+    </main>
+  </body>
+</html>
