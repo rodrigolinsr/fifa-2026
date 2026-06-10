@@ -2,6 +2,12 @@
 
 This app is a static HTML/CSS/JavaScript site served by Nginx.
 
+## Cache Invalidation
+
+Nginx sends `Cache-Control: no-store` for HTML, CSS, and JavaScript files. That keeps deployments straightforward: when a new container version is released, browsers should request the newest app files instead of reusing stale cached ones.
+
+Image/font assets can still be cached for a short period because they are not the source of app logic.
+
 ## Coolify
 
 ### Option 1: Deploy the Docker image
