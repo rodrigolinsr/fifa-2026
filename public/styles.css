@@ -501,6 +501,11 @@ input {
   white-space: nowrap;
 }
 
+.team-code {
+  display: none;
+  white-space: nowrap;
+}
+
 .placeholder-team .team-text {
   color: var(--muted);
 }
@@ -738,7 +743,6 @@ button:focus-visible {
   .summary-strip,
   .groups-grid,
   .knockout-board,
-  .match-main,
   .stage-round-of-32 .match-list,
   .stage-round-of-16 .match-list,
   .stage-quarterfinals .match-list,
@@ -755,15 +759,29 @@ button:focus-visible {
     grid-column: span 1;
   }
 
-  .team-name.away {
-    justify-content: flex-start;
-    text-align: left;
+  .match-main {
+    grid-template-columns: minmax(56px, 1fr) auto minmax(56px, 1fr);
+    gap: 6px;
   }
 
-  .team-name.away .team-text,
-  .team-name.away .flag,
-  .team-name.away .flag-placeholder {
-    order: initial;
+  .match-main .team-name {
+    gap: 5px;
+    font-weight: 650;
+  }
+
+  .match-main .team-text {
+    display: none;
+  }
+
+  .match-main .team-code {
+    display: inline;
+  }
+
+  .match-main .flag,
+  .match-main .flag-placeholder {
+    width: 22px;
+    min-width: 22px;
+    height: 16px;
   }
 
   .score-entry {

@@ -687,6 +687,7 @@ function renderTeam(team, fallbackLabel = "TBD", modifier = "") {
       <span class="team-name placeholder-team ${modifier}">
         <span class="flag-placeholder" aria-hidden="true">?</span>
         <span class="team-text">${escapeHTML(fallbackLabel || "TBD")}</span>
+        <span class="team-code">TBD</span>
       </span>
     `;
   }
@@ -700,6 +701,7 @@ function renderTeam(team, fallbackLabel = "TBD", modifier = "") {
     <span class="team-name ${team.isPlaceholder ? "placeholder-team" : ""} ${modifier}">
       ${flag}
       <span class="team-text">${escapeHTML(team.name)}</span>
+      <span class="team-code">${escapeHTML(team.fifaCode)}</span>
     </span>
   `;
 }
