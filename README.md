@@ -28,6 +28,7 @@ You can secure `/admin` and `/admin/api` directly in the app server with env var
 Behavior:
 
 - If both are set, HTTP Basic Auth is required for `/admin` and `/admin/api`.
+- Public `GET /admin/api/results` remains open so the main app can display official results.
 - If both are empty/unset, admin routes are open.
 - If only one is set, admin routes return `503` with a clear misconfiguration message.
 

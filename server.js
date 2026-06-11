@@ -37,11 +37,11 @@ const server = http.createServer(async (req, res) => {
     const pathname = url.pathname;
     const { method } = req;
 
-    if (requiresAdminAuth(pathname) && adminAuthMisconfigured) {
+    if (requiresAdminAuth(pathname, method) && adminAuthMisconfigured) {
       return sendJSON(res, 503, { error: "Admin auth misconfigured. Set both ADMIN_BASIC_USER and ADMIN_BASIC_PASS." });
     }
 
-    if (requiresAdminAuth(pathname) && !isAuthorized(req)) {
+    if (requiresAdminAuth(pathname, method) && !isAuthorized(req)) {
       return sendUnauthorized(res);
     }
 
@@ -290,7 +290,11 @@ function toScore(value) {
   return null;
 }
 
-function requiresAdminAuth(pathname) {
+function requiresAdminAuth(pathname, method) {
+  if (pathname === "/admin/api/results" && (method === "GET" || method === "HEAD")) {
+    return false;
+  }
+
   return pathname === "/admin" || pathname.startsWith("/admin/");
 }
 
