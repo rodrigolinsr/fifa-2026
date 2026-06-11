@@ -16,18 +16,11 @@ In Docker Compose, a named volume (`results_data`) persists JSON data between re
 
 Basic Auth protection is intentionally not enforced in this repository logic; configure it in your Nginx/Coolify layer for `/admin` and `/admin/api` routes.
 
-### Built-in admin auth (optional)
+### Admin protection
 
-You can secure `/admin` and `/admin/api` directly in the app server with env vars:
+Built-in admin auth has been removed from the application server.
 
-- `ADMIN_BASIC_USER`
-- `ADMIN_BASIC_PASS`
-
-Behavior:
-
-- If both are set, HTTP Basic Auth is required for `/admin` and `/admin/api`.
-- If both are empty/unset, admin routes are open.
-- If only one is set, the app exits on startup to avoid partial/misconfigured security.
+Protect `/admin` and `/admin/api` at your reverse proxy layer (Coolify/Traefik/Nginx) using Basic Auth or another access-control mechanism.
 
 ## Cache Invalidation
 

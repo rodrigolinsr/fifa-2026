@@ -3,20 +3,11 @@
 const fs = require("node:fs/promises");
 const http = require("node:http");
 const path = require("node:path");
-const crypto = require("node:crypto");
 
 const PORT = Number(process.env.PORT || 8080);
 const DATA_DIR = process.env.DATA_DIR || "/data";
 const RESULTS_FILE = process.env.RESULTS_FILE || path.join(DATA_DIR, "match-results.json");
 const PUBLIC_DIR = path.join(__dirname, "public");
-const ADMIN_BASIC_USER = process.env.ADMIN_BASIC_USER || "";
-const ADMIN_BASIC_PASS = process.env.ADMIN_BASIC_PASS || "";
-const adminAuthConfigured = ADMIN_BASIC_USER !== "" || ADMIN_BASIC_PASS !== "";
-const adminAuthEnabled = ADMIN_BASIC_USER !== "" && ADMIN_BASIC_PASS !== "";
-
-if (adminAuthConfigured && !adminAuthEnabled) {
-  throw new Error("Set both ADMIN_BASIC_USER and ADMIN_BASIC_PASS, or leave both empty.");
-}
 
 const MIME_TYPES = {
   ".css": "text/css; charset=utf-8",
@@ -40,10 +31,6 @@ const server = http.createServer(async (req, res) => {
     const pathname = url.pathname;
     const { method } = req;
 
-    if (requiresAdminAuth(pathname) && !isAuthorized(req)) {
-      return sendUnauthorized(res);
-    }
-
     if (pathname === "/healthz") {
       return sendText(res, 200, "ok\n", "text/plain; charset=utf-8", "no-store");
     }
@@ -58,6 +45,7 @@ const server = http.createServer(async (req, res) => {
 
     return handleStatic(res, pathname, method === "HEAD");
   } catch (error) {
+    console.error("[request-error]", error && error.stack ? error.stack : error);
     if (error && error.code === "INVALID_JSON") {
       return sendJSON(res, 400, { error: "Invalid JSON body." });
     }
@@ -70,8 +58,11 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, "0.0.0.0", async () => {
-  await ensureDataFile();
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`[startup] Server listening on 0.0.0.0:${PORT}`);
+  ensureDataFile().catch((error) => {
+    console.error("[startup] Could not prepare data file:", error && error.stack ? error.stack : error);
+  });
 });
 
 async function handleAdminApi(req, res, pathname, method) {
@@ -278,47 +269,6 @@ function toScore(value) {
   if (typeof value === "number" && Number.isInteger(value) && value >= 0) return value;
   if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
   return null;
-}
-
-function requiresAdminAuth(pathname) {
-  return pathname === "/admin" || pathname.startsWith("/admin/");
-}
-
-function isAuthorized(req) {
-  if (!adminAuthEnabled) return true;
-
-  const header = req.headers.authorization;
-  if (!header || !header.startsWith("Basic ")) return false;
-
-  const encoded = header.slice(6).trim();
-  let decoded;
-
-  try {
-    decoded = Buffer.from(encoded, "base64").toString("utf8");
-  } catch {
-    return false;
-  }
-
-  const separatorIndex = decoded.indexOf(":");
-  if (separatorIndex < 0) return false;
-
-  const user = decoded.slice(0, separatorIndex);
-  const pass = decoded.slice(separatorIndex + 1);
-  return timingSafeEqualString(user, ADMIN_BASIC_USER) && timingSafeEqualString(pass, ADMIN_BASIC_PASS);
-}
-
-function timingSafeEqualString(a, b) {
-  const aBuffer = Buffer.from(String(a));
-  const bBuffer = Buffer.from(String(b));
-  if (aBuffer.length !== bBuffer.length) return false;
-  return crypto.timingSafeEqual(aBuffer, bBuffer);
-}
-
-function sendUnauthorized(res) {
-  res.statusCode = 401;
-  res.setHeader("WWW-Authenticate", 'Basic realm="Admin Area"');
-  res.setHeader("Cache-Control", "no-store");
-  res.end("Unauthorized\n");
 }
 
 process.on("uncaughtException", (error) => {
