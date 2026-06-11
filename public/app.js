@@ -191,6 +191,7 @@ const TIMEZONE_KEY = "wc2026:timezone";
 const TIMEZONE_CONFIRMED_KEY = "wc2026:timezoneConfirmed";
 const THEME_KEY = "wc2026:theme";
 const SCORE_EDIT_LOCK_MINUTES = 1;
+const MATCH_ONGOING_DURATION_MINUTES = 113;
 const SCORE_EDIT_LOCK_INTERVAL_MS = 15000;
 const THIRD_PLACE_SLOT_ORDER = ["1A", "1B", "1D", "1E", "1G", "1I", "1K", "1L"];
 
@@ -648,13 +649,20 @@ function renderMatch(match) {
   const score = state.scores[match.id] || {};
   const formatted = formatKickoff(match.kickoff);
   const matchLocked = isMatchLocked(match);
+  const matchOngoing = isMatchOngoing(match);
   const advancerPicker = renderAdvancerPicker(match, resolvedTeams, score, matchLocked);
 
   return `
     <article class="match-row" data-match-id="${match.id}">
       <div class="match-topline">
         <span><span class="match-number">Match ${match.number}</span> · ${escapeHTML(formatted.date)} · ${escapeHTML(formatted.time)}</span>
-        <span>${escapeHTML(city.name)}</span>
+        <div class="match-meta">
+          <span>${escapeHTML(city.name)}</span>
+          <span class="match-live-indicator" data-match-live data-match-id="${match.id}" ${matchOngoing ? "" : "hidden"}>
+            <span class="live-ball" aria-hidden="true">⚽</span>
+            <span>Live</span>
+          </span>
+        </div>
       </div>
       <div class="match-main" aria-label="Score for match ${match.number}">
         ${renderTeam(resolvedTeams.home.team, resolvedTeams.home.label)}
@@ -1066,8 +1074,17 @@ function getMatchEditDeadline(match) {
   return match.kickoff.getTime() - SCORE_EDIT_LOCK_MINUTES * 60000;
 }
 
+function getMatchFinalWhistle(match) {
+  return match.kickoff.getTime() + MATCH_ONGOING_DURATION_MINUTES * 60000;
+}
+
 function isMatchLocked(match, now = Date.now()) {
   return now >= getMatchEditDeadline(match);
+}
+
+function isMatchOngoing(match, now = Date.now()) {
+  const kickoffTime = match.kickoff.getTime();
+  return now >= kickoffTime && now < getMatchFinalWhistle(match);
 }
 
 function refreshMatchEditability() {
@@ -1079,16 +1096,30 @@ function refreshMatchEditability() {
   });
 }
 
+function refreshMatchLiveIndicators() {
+  const now = Date.now();
+  document.querySelectorAll("[data-match-live]").forEach((indicator) => {
+    const match = matchesById.get(Number(indicator.dataset.matchId));
+    if (!match) return;
+    indicator.hidden = !isMatchOngoing(match, now);
+  });
+}
+
 function startMatchEditabilityObserver() {
   refreshMatchEditability();
+  refreshMatchLiveIndicators();
   if (matchEditabilityObserver !== null) {
     clearInterval(matchEditabilityObserver);
   }
 
-  matchEditabilityObserver = window.setInterval(refreshMatchEditability, SCORE_EDIT_LOCK_INTERVAL_MS);
+  matchEditabilityObserver = window.setInterval(() => {
+    refreshMatchEditability();
+    refreshMatchLiveIndicators();
+  }, SCORE_EDIT_LOCK_INTERVAL_MS);
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) {
       refreshMatchEditability();
+      refreshMatchLiveIndicators();
     }
   });
 }
