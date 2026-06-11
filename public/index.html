@@ -46,6 +46,17 @@
     </header>
 
     <main class="page-shell">
+      <section class="score-mode-panel" aria-label="Score display mode">
+        <div>
+          <p class="score-mode-eyebrow">Display Mode</p>
+          <p id="scoreModeHint">Using your saved picks for standings and knockout progression.</p>
+        </div>
+        <div class="score-mode-toggle" role="group" aria-label="Choose score source">
+          <button class="mode-pill" id="scoreSourceUser" data-score-source-btn="user" type="button">🎯 My picks</button>
+          <button class="mode-pill" id="scoreSourceOfficial" data-score-source-btn="official" type="button">🏆 Actual results</button>
+        </div>
+      </section>
+
       <section class="toolbar" aria-label="Match filters">
         <div class="field">
           <label for="searchInput">Search</label>
@@ -55,7 +66,7 @@
           <label for="stageFilter">View</label>
           <select id="stageFilter"></select>
         </div>
-        <button class="button danger" id="resetScores" type="button">Reset scores</button>
+        <button class="button danger" id="resetScores" type="button">Reset my picks</button>
       </section>
 
       <section class="summary-strip" aria-label="Tournament summary">

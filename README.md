@@ -1,6 +1,6 @@
 # Deployment
 
-This app is a static HTML/CSS/JavaScript site served by Nginx.
+This app is a single Node.js container that serves the static frontend and the admin JSON API.
 
 ## Admin results API
 
@@ -11,10 +11,23 @@ An admin page is available at `/admin/` to manually save official match results 
 - Healthcheck: `/admin/api/healthz`
 - Data file inside containers: `/data/match-results.json`
 
-The API is a small Node.js service (`admin-api/server.js`) and is reverse-proxied by Nginx.
+The API is built into the same server process (`server.js`) used to serve the frontend.
 In Docker Compose, a named volume (`results_data`) persists JSON data between restarts.
 
 Basic Auth protection is intentionally not enforced in this repository logic; configure it in your Nginx/Coolify layer for `/admin` and `/admin/api` routes.
+
+### Built-in admin auth (optional)
+
+You can secure `/admin` and `/admin/api` directly in the app server with env vars:
+
+- `ADMIN_BASIC_USER`
+- `ADMIN_BASIC_PASS`
+
+Behavior:
+
+- If both are set, HTTP Basic Auth is required for `/admin` and `/admin/api`.
+- If both are empty/unset, admin routes are open.
+- If only one is set, the app exits on startup to avoid partial/misconfigured security.
 
 ## Cache Invalidation
 
@@ -49,7 +62,7 @@ Coolify settings:
 - Image: `ghcr.io/<owner>/<repo>:latest`
 - Internal port: `8080`
 - Healthcheck path: `/healthz`
-- Volumes: none
+- Volumes: mount a persistent volume to `/data` (required for admin results persistence)
 - Environment variables: none required
 
 The GHCR package must be public if you want Coolify to pull it without registry authentication.

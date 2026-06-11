@@ -1,15 +1,19 @@
-FROM nginxinc/nginx-unprivileged:1.27-alpine
+FROM node:20-alpine
 
 ARG APP_VERSION
 
-USER root
+WORKDIR /app
 
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY public/ /usr/share/nginx/html/
+COPY public/ /app/public/
+COPY server.js /app/server.js
 
 RUN version="${APP_VERSION:-$(date +%s)}" \
-  && sed -i "s#styles.css#styles.css?v=${version}#g; s#app.js#app.js?v=${version}#g" /usr/share/nginx/html/index.html
+  && sed -i "s#styles.css#styles.css?v=${version}#g; s#app.js#app.js?v=${version}#g" /app/public/index.html
 
-USER 101
+RUN mkdir -p /data && chown -R node:node /app /data
+
+USER node
 
 EXPOSE 8080
+
+CMD ["node", "server.js"]

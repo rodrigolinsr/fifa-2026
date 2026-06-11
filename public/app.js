@@ -187,6 +187,7 @@ const THIRD_PLACE_COMBINATIONS = `EFGHIJKL:3E,3J,3I,3F,3H,3G,3L,3K\nDFGHIJKL:3H,
 
 const SCORE_KEY = "wc2026:scores";
 const ADVANCER_KEY = "wc2026:advancers";
+const SCORE_SOURCE_KEY = "wc2026:scoreSource";
 const TIMEZONE_KEY = "wc2026:timezone";
 const TIMEZONE_CONFIRMED_KEY = "wc2026:timezoneConfirmed";
 const THEME_KEY = "wc2026:theme";
@@ -272,6 +273,7 @@ const state = {
   scores: readJSON(SCORE_KEY, {}),
   advancers: readJSON(ADVANCER_KEY, {}),
   officialResults: {},
+  scoreSource: getInitialScoreSource(),
   timezone: localStorage.getItem(TIMEZONE_KEY) || getBrowserTimezone(),
   timezoneConfirmed: localStorage.getItem(TIMEZONE_CONFIRMED_KEY) === "true",
   theme: localStorage.getItem(THEME_KEY) || "system"
@@ -336,6 +338,8 @@ const elements = {
   themeLabel: document.querySelector("#themeLabel"),
   searchInput: document.querySelector("#searchInput"),
   stageFilter: document.querySelector("#stageFilter"),
+  scoreModeHint: document.querySelector("#scoreModeHint"),
+  scoreSourceButtons: document.querySelectorAll("[data-score-source-btn]"),
   resetScores: document.querySelector("#resetScores"),
   groupsGrid: document.querySelector("#groupsGrid"),
   matchesContainer: document.querySelector("#matchesContainer"),
@@ -344,6 +348,7 @@ const elements = {
 };
 
 let matchEditabilityObserver = null;
+const overrideEditableMatchIds = new Set();
 
 init();
 
@@ -351,6 +356,7 @@ function init() {
   applyTheme();
   populateTimezoneSelect();
   populateStageFilter();
+  applyScoreSourceState();
   renderGroups();
   renderMatches();
   loadOfficialResults();
@@ -414,8 +420,21 @@ function init() {
     renderMatches();
   });
 
+  elements.scoreSourceButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const source = button.dataset.scoreSourceBtn === "official" ? "official" : "user";
+      if (state.scoreSource === source) return;
+
+      state.scoreSource = source;
+      localStorage.setItem(SCORE_SOURCE_KEY, state.scoreSource);
+      applyScoreSourceState();
+      renderGroups();
+      renderMatches();
+    });
+  });
+
   elements.resetScores.addEventListener("click", () => {
-    const confirmed = window.confirm("Reset all saved match scores?");
+    const confirmed = window.confirm("Reset all saved picks?");
     if (!confirmed) return;
     state.scores = {};
     state.advancers = {};
@@ -532,6 +551,10 @@ function renderMatches() {
 
   document.querySelectorAll("[data-advancer-select]").forEach((select) => {
     select.addEventListener("change", handleAdvancerInput);
+  });
+
+  document.querySelectorAll("[data-override-match]").forEach((button) => {
+    button.addEventListener("click", handleOverrideMatch);
   });
 }
 
@@ -650,12 +673,14 @@ function getStageClass(title) {
 function renderMatch(match) {
   const city = citiesById.get(match.cityId);
   const resolvedTeams = resolveMatchTeams(match);
-  const score = state.scores[match.id] || {};
+  const score = getDisplayScore(match);
   const formatted = formatKickoff(match.kickoff);
-  const matchLocked = isMatchLocked(match);
+  const readOnlyScores = isOfficialScoreMode();
+  const scoreInputDisabled = !isMatchEditable(match);
   const matchOngoing = isMatchOngoing(match);
-  const advancerPicker = renderAdvancerPicker(match, resolvedTeams, score, matchLocked);
-  const officialResult = renderOfficialResult(match, resolvedTeams);
+  const overrideControl = renderOverrideControl(match, readOnlyScores);
+  const advancerPicker = renderAdvancerPicker(match, resolvedTeams, score, scoreInputDisabled, readOnlyScores);
+  const officialResult = isOfficialScoreMode() ? "" : renderOfficialResult(match, resolvedTeams);
 
   return `
     <article class="match-row" data-match-id="${match.id}">
@@ -680,8 +705,8 @@ function renderMatch(match) {
             data-score-input
             data-match-id="${match.id}"
             data-side="home"
-            value="${escapeHTML(score.home || "")}"
-            ${matchLocked ? "disabled" : ""}
+            value="${escapeHTML(score.home ?? "")}" 
+            ${scoreInputDisabled ? "disabled" : ""}
           >
           <span class="score-separator">:</span>
           <input
@@ -692,15 +717,29 @@ function renderMatch(match) {
             data-score-input
             data-match-id="${match.id}"
             data-side="away"
-            value="${escapeHTML(score.away || "")}"
-            ${matchLocked ? "disabled" : ""}
+            value="${escapeHTML(score.away ?? "")}"
+            ${scoreInputDisabled ? "disabled" : ""}
           >
         </div>
         ${renderTeam(resolvedTeams.away.team, resolvedTeams.away.label, "away")}
       </div>
+      ${overrideControl}
       ${advancerPicker}
       ${officialResult}
     </article>
+  `;
+}
+
+function renderOverrideControl(match, readOnlyScores) {
+  if (readOnlyScores) return "";
+  if (!isMatchLocked(match)) return "";
+
+  const unlocked = overrideEditableMatchIds.has(match.id);
+
+  return `
+    <div class="match-override-wrap">
+      <button class="match-override-button ${unlocked ? "is-unlocked" : ""}" type="button" data-override-match="${match.id}">${unlocked ? "Lock pick" : "Unlock pick"}</button>
+    </div>
   `;
 }
 
@@ -810,7 +849,7 @@ function calculateGroupStandings(group, groupTeams) {
   ]));
 
   getGroupMatches(group).forEach((match) => {
-    const score = state.scores[match.id];
+    const score = getActiveScore(match);
     if (!isCompleteScore(score)) return;
 
     const home = table.get(match.homeTeamId);
@@ -861,11 +900,11 @@ function getGroupStandingsMap() {
 function areAllGroupMatchesComplete() {
   return matches
     .filter((match) => match.stageId === 1)
-    .every((match) => isCompleteScore(state.scores[match.id]));
+    .every((match) => isCompleteScore(getActiveScore(match)));
 }
 
 function areGroupMatchesComplete(group) {
-  return getGroupMatches(group).every((match) => isCompleteScore(state.scores[match.id]));
+  return getGroupMatches(group).every((match) => isCompleteScore(getActiveScore(match)));
 }
 
 function getQualifiedThirdPlaceGroups(standingsByGroup) {
@@ -958,15 +997,17 @@ function getKnockoutOutcome(matchNumber, visited = new Set()) {
   visited.add(visitKey);
 
   const resolvedTeams = resolveMatchTeams(match, visited);
-  const score = state.scores[match.id];
+  const score = getActiveScore(match);
   const scoreWinner = getScoreWinnerSide(score);
 
   if (scoreWinner === "home") return { winner: resolvedTeams.home.team, loser: resolvedTeams.away.team };
   if (scoreWinner === "away") return { winner: resolvedTeams.away.team, loser: resolvedTeams.home.team };
 
-  const selectedAdvancer = state.advancers[match.id];
-  if (selectedAdvancer === "home") return { winner: resolvedTeams.home.team, loser: resolvedTeams.away.team };
-  if (selectedAdvancer === "away") return { winner: resolvedTeams.away.team, loser: resolvedTeams.home.team };
+  if (!isOfficialScoreMode()) {
+    const selectedAdvancer = state.advancers[match.id];
+    if (selectedAdvancer === "home") return { winner: resolvedTeams.home.team, loser: resolvedTeams.away.team };
+    if (selectedAdvancer === "away") return { winner: resolvedTeams.away.team, loser: resolvedTeams.home.team };
+  }
 
   return { winner: null, loser: null };
 }
@@ -981,8 +1022,10 @@ function getScoreWinnerSide(score) {
   return "tie";
 }
 
-function renderAdvancerPicker(match, resolvedTeams, score, matchLocked) {
+function renderAdvancerPicker(match, resolvedTeams, score, scoreInputDisabled, readOnlyScores) {
   if (match.stageId === 1) return "";
+  if (readOnlyScores) return "";
+  if (scoreInputDisabled) return "";
   if (!resolvedTeams.home.team || !resolvedTeams.away.team) return "";
   if (getScoreWinnerSide(score) !== "tie") return "";
 
@@ -1029,10 +1072,15 @@ function matchMatchesFilters(match) {
 }
 
 function handleScoreInput(event) {
+  if (isOfficialScoreMode()) {
+    renderMatches();
+    return;
+  }
+
   const input = event.currentTarget;
   const matchId = input.dataset.matchId;
   const match = matchesById.get(Number(matchId));
-  if (!match || isMatchLocked(match)) {
+  if (!match || !isMatchEditable(match)) {
     renderMatches();
     return;
   }
@@ -1063,15 +1111,22 @@ function handleScoreInput(event) {
   const nextInput = document.querySelector(`[data-score-input][data-match-id="${matchId}"][data-side="${side}"]`);
   if (nextInput) {
     nextInput.focus();
-    nextInput.setSelectionRange(nextInput.value.length, nextInput.value.length);
+    if (typeof nextInput.setSelectionRange === "function" && nextInput.type !== "number") {
+      nextInput.setSelectionRange(nextInput.value.length, nextInput.value.length);
+    }
   }
 }
 
 function handleAdvancerInput(event) {
+  if (isOfficialScoreMode()) {
+    renderMatches();
+    return;
+  }
+
   const select = event.currentTarget;
   const matchId = select.dataset.matchId;
   const match = matchesById.get(Number(matchId));
-  if (!match || isMatchLocked(match)) {
+  if (!match || !isMatchEditable(match)) {
     renderMatches();
     return;
   }
@@ -1092,6 +1147,20 @@ function updateTimezoneState() {
     ? `Kickoffs are shown in ${state.timezone}.`
     : "Confirm your timezone to localize every kickoff.";
   elements.confirmTimezone.hidden = state.timezoneConfirmed;
+}
+
+function applyScoreSourceState() {
+  const usingOfficial = isOfficialScoreMode();
+
+  elements.scoreSourceButtons.forEach((button) => {
+    const active = button.dataset.scoreSourceBtn === state.scoreSource;
+    button.setAttribute("aria-pressed", String(active));
+    button.classList.toggle("is-active", active);
+  });
+
+  elements.scoreModeHint.textContent = usingOfficial
+    ? "Using only official results from admin source for standings and knockout progression."
+    : "Using your saved picks for standings and knockout progression.";
 }
 
 async function loadOfficialResults() {
@@ -1129,6 +1198,27 @@ function normalizeOfficialResults(results) {
   });
 
   return normalized;
+}
+
+function getActiveScore(match) {
+  if (isOfficialScoreMode()) {
+    return state.officialResults[match.number] || null;
+  }
+
+  return state.scores[match.id] || null;
+}
+
+function getDisplayScore(match) {
+  return getActiveScore(match) || {};
+}
+
+function isOfficialScoreMode() {
+  return state.scoreSource === "official";
+}
+
+function getInitialScoreSource() {
+  const saved = localStorage.getItem(SCORE_SOURCE_KEY);
+  return saved === "official" ? "official" : "user";
 }
 
 function persistTimezone() {
@@ -1190,11 +1280,18 @@ function isMatchOngoing(match, now = Date.now()) {
 }
 
 function refreshMatchEditability() {
+  if (isOfficialScoreMode()) {
+    document.querySelectorAll("[data-score-input], [data-advancer-select]").forEach((field) => {
+      field.disabled = true;
+    });
+    return;
+  }
+
   const now = Date.now();
   document.querySelectorAll("[data-score-input], [data-advancer-select]").forEach((field) => {
     const match = matchesById.get(Number(field.dataset.matchId));
     if (!match) return;
-    field.disabled = isMatchLocked(match, now);
+    field.disabled = !isMatchEditable(match, now);
   });
 }
 
@@ -1224,6 +1321,27 @@ function startMatchEditabilityObserver() {
       refreshMatchLiveIndicators();
     }
   });
+}
+
+function handleOverrideMatch(event) {
+  const button = event.currentTarget;
+  const matchId = Number(button.dataset.overrideMatch);
+  if (!Number.isInteger(matchId) || matchId <= 0) return;
+
+  if (overrideEditableMatchIds.has(matchId)) {
+    overrideEditableMatchIds.delete(matchId);
+  } else {
+    overrideEditableMatchIds.add(matchId);
+  }
+
+  renderGroups();
+  renderMatches();
+}
+
+function isMatchEditable(match, now = Date.now()) {
+  if (isOfficialScoreMode()) return false;
+  if (!isMatchLocked(match, now)) return true;
+  return overrideEditableMatchIds.has(match.id);
 }
 
 function groupBy(items, getKey) {
