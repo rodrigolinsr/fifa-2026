@@ -18,11 +18,20 @@ The app server always listens on container port `8080`.
 
 Basic Auth protection is intentionally not enforced in this repository logic; configure it in your Nginx/Coolify layer for `/admin` and `/admin/api` routes.
 
-### Admin protection
+### Admin protection (built-in, optional)
 
-Built-in admin auth has been removed from the application server.
+You can secure `/admin` and `/admin/api` directly in the app server with env vars:
 
-Protect `/admin` and `/admin/api` at your reverse proxy layer (Coolify/Traefik/Nginx) using Basic Auth or another access-control mechanism.
+- `ADMIN_BASIC_USER`
+- `ADMIN_BASIC_PASS`
+
+Behavior:
+
+- If both are set, HTTP Basic Auth is required for `/admin` and `/admin/api`.
+- If both are empty/unset, admin routes are open.
+- If only one is set, admin routes return `503` with a clear misconfiguration message.
+
+You can still add proxy-level protection in Coolify for extra defense.
 
 ## Cache Invalidation
 
