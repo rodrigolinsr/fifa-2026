@@ -4,7 +4,7 @@ const fs = require("node:fs/promises");
 const http = require("node:http");
 const path = require("node:path");
 
-const PORT = Number(process.env.PORT || 8080);
+const PORT = 8080;
 const DATA_DIR = process.env.DATA_DIR || "/data";
 const RESULTS_FILE = process.env.RESULTS_FILE || path.join(DATA_DIR, "match-results.json");
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -59,7 +59,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`[startup] Server listening on 0.0.0.0:${PORT}`);
+  console.log(`[startup] Server listening on 0.0.0.0:${PORT} (env PORT=${process.env.PORT || "unset"}, LISTEN_PORT=${process.env.LISTEN_PORT || "unset"})`);
   ensureDataFile().catch((error) => {
     console.error("[startup] Could not prepare data file:", error && error.stack ? error.stack : error);
   });
@@ -270,9 +270,3 @@ function toScore(value) {
   if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
   return null;
 }
-
-process.on("uncaughtException", (error) => {
-  if (error && error.code === "EADDRINUSE") {
-    process.exit(1);
-  }
-});

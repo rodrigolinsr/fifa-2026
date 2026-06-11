@@ -14,6 +14,8 @@ An admin page is available at `/admin/` to manually save official match results 
 The API is built into the same server process (`server.js`) used to serve the frontend.
 In Docker Compose, a named volume (`results_data`) persists JSON data between restarts.
 
+The app server always listens on container port `8080`.
+
 Basic Auth protection is intentionally not enforced in this repository logic; configure it in your Nginx/Coolify layer for `/admin` and `/admin/api` routes.
 
 ### Admin protection
