@@ -632,6 +632,118 @@ input {
   font-weight: 550;
 }
 
+.official-result {
+  display: grid;
+  gap: 4px;
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--line);
+}
+
+.official-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.official-scoreline,
+.official-placeholder {
+  min-height: 22px;
+  display: flex;
+  align-items: center;
+}
+
+.official-scoreline {
+  gap: 6px;
+  justify-content: space-between;
+}
+
+.official-side {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.official-side.away {
+  justify-content: flex-end;
+}
+
+.official-team {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.official-team-short {
+  display: none;
+}
+
+.official-score-box {
+  display: inline-grid;
+  place-items: center;
+  min-width: 26px;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.official-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  font-size: 0.58rem;
+  font-weight: 650;
+  border: 1px solid var(--line);
+  color: color-mix(in srgb, var(--muted) 75%, var(--text));
+  background: var(--surface-3);
+  opacity: 0.78;
+}
+
+.official-badge.win {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--line));
+  background: color-mix(in srgb, var(--accent-soft) 38%, var(--surface));
+  color: color-mix(in srgb, var(--accent) 72%, var(--text));
+}
+
+.official-badge.loss {
+  border-color: color-mix(in srgb, var(--danger) 28%, var(--line));
+  background: color-mix(in srgb, var(--danger-soft) 38%, var(--surface));
+  color: color-mix(in srgb, var(--danger) 70%, var(--text));
+}
+
+.official-badge.draw {
+  border-color: color-mix(in srgb, #c69720 34%, var(--line));
+  background: color-mix(in srgb, var(--third) 40%, var(--surface));
+  color: color-mix(in srgb, #8b6b07 70%, var(--text));
+}
+
+.official-divider {
+  color: var(--muted);
+  font-weight: 700;
+  opacity: 0.9;
+}
+
+.official-placeholder {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-style: italic;
+}
+
 .advancer-picker select {
   min-height: 32px;
   width: min(190px, 100%);
@@ -787,6 +899,14 @@ button:focus-visible {
 }
 
 @media (max-width: 740px) {
+  .official-team-full {
+    display: none;
+  }
+
+  .official-team-short {
+    display: inline;
+  }
+
   .match-live-indicator span:not(.live-ball) {
     display: none;
   }

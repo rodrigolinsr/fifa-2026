@@ -2,6 +2,20 @@
 
 This app is a static HTML/CSS/JavaScript site served by Nginx.
 
+## Admin results API
+
+An admin page is available at `/admin/` to manually save official match results into a server JSON file.
+
+- Admin UI: `/admin/`
+- API base: `/admin/api/`
+- Healthcheck: `/admin/api/healthz`
+- Data file inside containers: `/data/match-results.json`
+
+The API is a small Node.js service (`admin-api/server.js`) and is reverse-proxied by Nginx.
+In Docker Compose, a named volume (`results_data`) persists JSON data between restarts.
+
+Basic Auth protection is intentionally not enforced in this repository logic; configure it in your Nginx/Coolify layer for `/admin` and `/admin/api` routes.
+
 ## Cache Invalidation
 
 The Docker image build stamps `index.html` with a version query string for the local CSS and JavaScript files:
@@ -76,6 +90,7 @@ docker compose up --build
 ```
 
 Then open `http://localhost:8080`.
+Admin is at `http://localhost:8080/admin/`.
 
 To use a different local host port:
 

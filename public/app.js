@@ -193,6 +193,7 @@ const THEME_KEY = "wc2026:theme";
 const SCORE_EDIT_LOCK_MINUTES = 1;
 const MATCH_ONGOING_DURATION_MINUTES = 113;
 const SCORE_EDIT_LOCK_INTERVAL_MS = 15000;
+const OFFICIAL_RESULTS_REFRESH_MS = 60000;
 const THIRD_PLACE_SLOT_ORDER = ["1A", "1B", "1D", "1E", "1G", "1I", "1K", "1L"];
 
 const FLAG_CODES = {
@@ -270,6 +271,7 @@ const state = {
   stageFilter: "all",
   scores: readJSON(SCORE_KEY, {}),
   advancers: readJSON(ADVANCER_KEY, {}),
+  officialResults: {},
   timezone: localStorage.getItem(TIMEZONE_KEY) || getBrowserTimezone(),
   timezoneConfirmed: localStorage.getItem(TIMEZONE_CONFIRMED_KEY) === "true",
   theme: localStorage.getItem(THEME_KEY) || "system"
@@ -351,6 +353,8 @@ function init() {
   populateStageFilter();
   renderGroups();
   renderMatches();
+  loadOfficialResults();
+  window.setInterval(loadOfficialResults, OFFICIAL_RESULTS_REFRESH_MS);
   startMatchEditabilityObserver();
   updateTimezoneState();
 
@@ -651,6 +655,7 @@ function renderMatch(match) {
   const matchLocked = isMatchLocked(match);
   const matchOngoing = isMatchOngoing(match);
   const advancerPicker = renderAdvancerPicker(match, resolvedTeams, score, matchLocked);
+  const officialResult = renderOfficialResult(match, resolvedTeams);
 
   return `
     <article class="match-row" data-match-id="${match.id}">
@@ -694,8 +699,68 @@ function renderMatch(match) {
         ${renderTeam(resolvedTeams.away.team, resolvedTeams.away.label, "away")}
       </div>
       ${advancerPicker}
+      ${officialResult}
     </article>
   `;
+}
+
+function renderOfficialResult(match, resolvedTeams) {
+  const official = state.officialResults[match.number];
+
+  if (!official) {
+    return `
+      <div class="official-result pending" aria-live="polite">
+        <span class="official-label">Official result</span>
+        <div class="official-placeholder">Pending confirmation</div>
+      </div>
+    `;
+  }
+
+  const homeName = resolvedTeams.home.team?.name || resolvedTeams.home.label || "Home";
+  const awayName = resolvedTeams.away.team?.name || resolvedTeams.away.label || "Away";
+  const homeShort = resolvedTeams.home.team?.fifaCode || getShortTeamLabel(homeName);
+  const awayShort = resolvedTeams.away.team?.fifaCode || getShortTeamLabel(awayName);
+  const outcome = getOfficialOutcome(official.home, official.away);
+  const homeBadge = outcome === "draw" ? "D" : outcome === "home" ? "W" : "L";
+  const awayBadge = outcome === "draw" ? "D" : outcome === "away" ? "W" : "L";
+  const homeClass = outcome === "draw" ? "draw" : outcome === "home" ? "win" : "loss";
+  const awayClass = outcome === "draw" ? "draw" : outcome === "away" ? "win" : "loss";
+
+  return `
+    <div class="official-result" aria-live="polite">
+      <span class="official-label">Official result</span>
+      <div class="official-scoreline">
+        <span class="official-side" title="${escapeHTML(homeName)}">
+          <span class="official-badge ${homeClass}" aria-label="${homeBadge}">${homeBadge}</span>
+          <span class="official-team official-team-full">${escapeHTML(homeName)}</span>
+          <span class="official-team official-team-short">${escapeHTML(homeShort)}</span>
+          <span class="official-score-box">${official.home}</span>
+        </span>
+        <span class="official-divider">-</span>
+        <span class="official-side away" title="${escapeHTML(awayName)}">
+          <span class="official-score-box">${official.away}</span>
+          <span class="official-team official-team-full">${escapeHTML(awayName)}</span>
+          <span class="official-team official-team-short">${escapeHTML(awayShort)}</span>
+          <span class="official-badge ${awayClass}" aria-label="${awayBadge}">${awayBadge}</span>
+        </span>
+      </div>
+    </div>
+  `;
+}
+
+function getOfficialOutcome(homeScore, awayScore) {
+  if (homeScore > awayScore) return "home";
+  if (awayScore > homeScore) return "away";
+  return "draw";
+}
+
+function getShortTeamLabel(label) {
+  const cleaned = String(label || "").trim();
+  if (!cleaned) return "TBD";
+
+  const alnum = cleaned.replace(/[^A-Za-z0-9]/g, "");
+  if (alnum.length >= 3) return alnum.slice(0, 3).toUpperCase();
+  return cleaned.slice(0, 3).toUpperCase();
 }
 
 function renderTeam(team, fallbackLabel = "TBD", modifier = "") {
@@ -1027,6 +1092,43 @@ function updateTimezoneState() {
     ? `Kickoffs are shown in ${state.timezone}.`
     : "Confirm your timezone to localize every kickoff.";
   elements.confirmTimezone.hidden = state.timezoneConfirmed;
+}
+
+async function loadOfficialResults() {
+  try {
+    const response = await fetch("/admin/api/results", {
+      method: "GET",
+      cache: "no-store"
+    });
+
+    if (!response.ok) {
+      return;
+    }
+
+    const payload = await response.json();
+    state.officialResults = normalizeOfficialResults(payload.results || {});
+    renderGroups();
+    renderMatches();
+  } catch {
+    // Keep previous data when official API is unavailable.
+  }
+}
+
+function normalizeOfficialResults(results) {
+  const normalized = {};
+
+  Object.entries(results).forEach(([matchNumber, value]) => {
+    const numberKey = Number(matchNumber);
+    const home = Number(value?.home);
+    const away = Number(value?.away);
+    if (!Number.isInteger(numberKey) || numberKey <= 0) return;
+    if (!Number.isInteger(home) || home < 0) return;
+    if (!Number.isInteger(away) || away < 0) return;
+
+    normalized[numberKey] = { home, away };
+  });
+
+  return normalized;
 }
 
 function persistTimezone() {

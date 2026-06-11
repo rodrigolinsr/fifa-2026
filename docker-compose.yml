@@ -14,3 +14,22 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    depends_on:
+      - admin-api
+    volumes:
+      - results_data:/data
+
+  admin-api:
+    image: node:20-alpine
+    restart: unless-stopped
+    working_dir: /app
+    command: ["node", "server.js"]
+    environment:
+      PORT: 3000
+      DATA_DIR: /data
+    volumes:
+      - ./admin-api:/app:ro
+      - results_data:/data
+
+volumes:
+  results_data:

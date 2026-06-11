@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>World Cup Admin</title>
+    <link rel="stylesheet" href="/admin/admin.css">
+    <script src="/admin/admin.js" defer></script>
+  </head>
+  <body>
+    <main class="admin-shell">
+      <header>
+        <p class="eyebrow">Admin</p>
+        <h1>Match Results</h1>
+        <p class="intro">Insert or update official match scores. Data is stored on the server JSON file.</p>
+      </header>
+
+      <section class="panel">
+        <div class="actions">
+          <button type="button" id="refreshButton" class="secondary">Refresh results</button>
+        </div>
+        <p id="status" aria-live="polite"></p>
+      </section>
+
+      <section class="panel">
+        <div class="results-header">
+          <h2>All matches</h2>
+          <p id="updatedAt">Last update: --</p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Match</th>
+                <th>Kickoff</th>
+                <th>Result</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="matchesBody">
+              <tr>
+                <td colspan="4" class="empty">Loading matches...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
