@@ -190,6 +190,8 @@ const ADVANCER_KEY = "wc2026:advancers";
 const TIMEZONE_KEY = "wc2026:timezone";
 const TIMEZONE_CONFIRMED_KEY = "wc2026:timezoneConfirmed";
 const THEME_KEY = "wc2026:theme";
+const SCORE_EDIT_LOCK_MINUTES = 1;
+const SCORE_EDIT_LOCK_INTERVAL_MS = 15000;
 const THIRD_PLACE_SLOT_ORDER = ["1A", "1B", "1D", "1E", "1G", "1I", "1K", "1L"];
 
 const FLAG_CODES = {
@@ -307,6 +309,7 @@ const matches = parseCSV(MATCHES_CSV).map((match) => ({
 const teamsById = new Map(teams.map((team) => [team.id, team]));
 const citiesById = new Map(cities.map((city) => [city.id, city]));
 const stagesById = new Map(stages.map((stage) => [stage.id, stage]));
+const matchesById = new Map(matches.map((match) => [match.id, match]));
 const matchesByNumber = new Map(matches.map((match) => [match.number, match]));
 const thirdPlaceCombinations = new Map(
   THIRD_PLACE_COMBINATIONS.trim().split("\n").map((line) => {
@@ -337,6 +340,8 @@ const elements = {
   matchCount: document.querySelector("#matchCount")
 };
 
+let matchEditabilityObserver = null;
+
 init();
 
 function init() {
@@ -345,6 +350,7 @@ function init() {
   populateStageFilter();
   renderGroups();
   renderMatches();
+  startMatchEditabilityObserver();
   updateTimezoneState();
 
   elements.timezoneSelect.addEventListener("change", () => {
@@ -641,7 +647,8 @@ function renderMatch(match) {
   const resolvedTeams = resolveMatchTeams(match);
   const score = state.scores[match.id] || {};
   const formatted = formatKickoff(match.kickoff);
-  const advancerPicker = renderAdvancerPicker(match, resolvedTeams, score);
+  const matchLocked = isMatchLocked(match);
+  const advancerPicker = renderAdvancerPicker(match, resolvedTeams, score, matchLocked);
 
   return `
     <article class="match-row" data-match-id="${match.id}">
@@ -661,6 +668,7 @@ function renderMatch(match) {
             data-match-id="${match.id}"
             data-side="home"
             value="${escapeHTML(score.home || "")}"
+            ${matchLocked ? "disabled" : ""}
           >
           <span class="score-separator">:</span>
           <input
@@ -672,6 +680,7 @@ function renderMatch(match) {
             data-match-id="${match.id}"
             data-side="away"
             value="${escapeHTML(score.away || "")}"
+            ${matchLocked ? "disabled" : ""}
           >
         </div>
         ${renderTeam(resolvedTeams.away.team, resolvedTeams.away.label, "away")}
@@ -899,7 +908,7 @@ function getScoreWinnerSide(score) {
   return "tie";
 }
 
-function renderAdvancerPicker(match, resolvedTeams, score) {
+function renderAdvancerPicker(match, resolvedTeams, score, matchLocked) {
   if (match.stageId === 1) return "";
   if (!resolvedTeams.home.team || !resolvedTeams.away.team) return "";
   if (getScoreWinnerSide(score) !== "tie") return "";
@@ -909,7 +918,7 @@ function renderAdvancerPicker(match, resolvedTeams, score) {
   return `
     <label class="advancer-picker">
       <span>Advances</span>
-      <select data-advancer-select data-match-id="${match.id}">
+      <select data-advancer-select data-match-id="${match.id}" ${matchLocked ? "disabled" : ""}>
         <option value="">Select team</option>
         <option value="home" ${selectedSide === "home" ? "selected" : ""}>${escapeHTML(resolvedTeams.home.team.name)}</option>
         <option value="away" ${selectedSide === "away" ? "selected" : ""}>${escapeHTML(resolvedTeams.away.team.name)}</option>
@@ -949,6 +958,12 @@ function matchMatchesFilters(match) {
 function handleScoreInput(event) {
   const input = event.currentTarget;
   const matchId = input.dataset.matchId;
+  const match = matchesById.get(Number(matchId));
+  if (!match || isMatchLocked(match)) {
+    renderMatches();
+    return;
+  }
+
   const side = input.dataset.side;
   const value = input.value.replace(/[^\d]/g, "");
 
@@ -982,6 +997,11 @@ function handleScoreInput(event) {
 function handleAdvancerInput(event) {
   const select = event.currentTarget;
   const matchId = select.dataset.matchId;
+  const match = matchesById.get(Number(matchId));
+  if (!match || isMatchLocked(match)) {
+    renderMatches();
+    return;
+  }
 
   if (select.value) {
     state.advancers[matchId] = select.value;
@@ -1040,6 +1060,37 @@ function formatKickoff(date) {
     date: dateFormatter.format(date),
     time: timeFormatter.format(date)
   };
+}
+
+function getMatchEditDeadline(match) {
+  return match.kickoff.getTime() - SCORE_EDIT_LOCK_MINUTES * 60000;
+}
+
+function isMatchLocked(match, now = Date.now()) {
+  return now >= getMatchEditDeadline(match);
+}
+
+function refreshMatchEditability() {
+  const now = Date.now();
+  document.querySelectorAll("[data-score-input], [data-advancer-select]").forEach((field) => {
+    const match = matchesById.get(Number(field.dataset.matchId));
+    if (!match) return;
+    field.disabled = isMatchLocked(match, now);
+  });
+}
+
+function startMatchEditabilityObserver() {
+  refreshMatchEditability();
+  if (matchEditabilityObserver !== null) {
+    clearInterval(matchEditabilityObserver);
+  }
+
+  matchEditabilityObserver = window.setInterval(refreshMatchEditability, SCORE_EDIT_LOCK_INTERVAL_MS);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+      refreshMatchEditability();
+    }
+  });
 }
 
 function groupBy(items, getKey) {

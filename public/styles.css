@@ -559,6 +559,15 @@ input {
   font-weight: 600;
 }
 
+.score-entry input:disabled,
+.advancer-picker select:disabled {
+  background: var(--surface-3);
+  border-color: var(--line);
+  color: var(--muted);
+  opacity: 0.8;
+  cursor: not-allowed;
+}
+
 .score-separator {
   color: var(--muted);
   text-align: center;
