@@ -346,7 +346,7 @@ input {
 .toolbar {
   padding: 12px;
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(180px, 240px) auto;
+  grid-template-columns: minmax(220px, 1fr) minmax(150px, 210px) minmax(180px, 240px) auto;
   gap: 10px;
   align-items: end;
 }

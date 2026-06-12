@@ -269,6 +269,7 @@ const FALLBACK_TIMEZONES = [
 
 const state = {
   search: "",
+  dateFilter: "all",
   stageFilter: "all",
   scores: readJSON(SCORE_KEY, {}),
   advancers: readJSON(ADVANCER_KEY, {}),
@@ -337,6 +338,7 @@ const elements = {
   themeIcon: document.querySelector("#themeIcon"),
   themeLabel: document.querySelector("#themeLabel"),
   searchInput: document.querySelector("#searchInput"),
+  dateFilter: document.querySelector("#dateFilter"),
   stageFilter: document.querySelector("#stageFilter"),
   scoreModeHint: document.querySelector("#scoreModeHint"),
   scoreSourceButtons: document.querySelectorAll("[data-score-source-btn]"),
@@ -355,6 +357,7 @@ init();
 function init() {
   applyTheme();
   populateTimezoneSelect();
+  populateDateFilter();
   populateStageFilter();
   applyScoreSourceState();
   renderGroups();
@@ -369,6 +372,7 @@ function init() {
     state.timezoneConfirmed = true;
     persistTimezone();
     updateTimezoneState();
+    populateDateFilter();
     renderGroups();
     renderMatches();
   });
@@ -378,6 +382,7 @@ function init() {
     state.timezoneConfirmed = true;
     persistTimezone();
     updateTimezoneState();
+    populateDateFilter();
     renderGroups();
     renderMatches();
   });
@@ -410,6 +415,12 @@ function init() {
 
   elements.searchInput.addEventListener("input", () => {
     state.search = elements.searchInput.value.trim().toLowerCase();
+    renderGroups();
+    renderMatches();
+  });
+
+  elements.dateFilter.addEventListener("change", () => {
+    state.dateFilter = elements.dateFilter.value;
     renderGroups();
     renderMatches();
   });
@@ -506,6 +517,55 @@ function populateTimezoneSelect() {
   elements.timezoneSelect.value = state.timezone;
 }
 
+function populateDateFilter() {
+  const selectedDate = state.dateFilter;
+  const dateOptions = getMatchDateOptions();
+  const hasSelectedDate = selectedDate === "all" || dateOptions.some((option) => option.key === selectedDate);
+
+  if (!hasSelectedDate) {
+    state.dateFilter = "all";
+  }
+
+  elements.dateFilter.innerHTML = [
+    `<option value="all">All days</option>`,
+    ...dateOptions.map((option) =>
+      `<option value="${escapeHTML(option.key)}">${escapeHTML(option.label)}</option>`
+    )
+  ].join("");
+  elements.dateFilter.value = state.dateFilter;
+}
+
+function getMatchDateOptions() {
+  const datesByKey = new Map();
+
+  sortMatchesByKickoff(matches).forEach((match) => {
+    const key = getMatchDateKey(match);
+    if (!datesByKey.has(key)) {
+      datesByKey.set(key, {
+        key,
+        label: formatMatchDateFilterLabel(match.kickoff),
+        kickoff: match.kickoff
+      });
+    }
+  });
+
+  return [...datesByKey.values()].sort((a, b) => a.kickoff - b.kickoff);
+}
+
+function getMatchDateKey(match) {
+  return formatDateParts(match.kickoff)
+    .join("-");
+}
+
+function formatMatchDateFilterLabel(date) {
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone: state.timezone
+  }).format(date);
+}
+
 function populateStageFilter() {
   const groupOptions = [...new Set(teams.map((team) => team.group))]
     .map((group) => `<option value="group:${group}">Group ${group}</option>`)
@@ -562,11 +622,13 @@ function shouldShowGroup(group, groupTeams) {
   if (state.stageFilter.startsWith("stage:") && state.stageFilter !== "stage:1") return false;
   if (state.stageFilter.startsWith("group:") && state.stageFilter !== `group:${group}`) return false;
 
+  const groupMatches = getGroupMatches(group);
+  const hasVisibleMatch = groupMatches.some(matchMatchesFilters);
+  if (state.dateFilter !== "all" && !hasVisibleMatch) return false;
   if (!state.search) return true;
 
-  const groupMatches = getGroupMatches(group);
   const teamHaystack = groupTeams.map((team) => `${team.name} ${team.fifaCode} Group ${group}`).join(" ").toLowerCase();
-  return teamHaystack.includes(state.search) || groupMatches.some(matchMatchesFilters);
+  return teamHaystack.includes(state.search) || hasVisibleMatch;
 }
 
 function renderGroupCard(group, groupTeams) {
@@ -1046,7 +1108,7 @@ function renderAdvancerPicker(match, resolvedTeams, score, scoreInputDisabled, r
   return `
     <label class="advancer-picker">
       <span>Advances</span>
-      <select data-advancer-select data-match-id="${match.id}" ${matchLocked ? "disabled" : ""}>
+      <select data-advancer-select data-match-id="${match.id}">
         <option value="">Select team</option>
         <option value="home" ${selectedSide === "home" ? "selected" : ""}>${escapeHTML(resolvedTeams.home.team.name)}</option>
         <option value="away" ${selectedSide === "away" ? "selected" : ""}>${escapeHTML(resolvedTeams.away.team.name)}</option>
@@ -1056,6 +1118,7 @@ function renderAdvancerPicker(match, resolvedTeams, score, scoreInputDisabled, r
 }
 
 function matchMatchesFilters(match) {
+  if (state.dateFilter !== "all" && getMatchDateKey(match) !== state.dateFilter) return false;
   if (state.stageFilter === "groups" && match.stageId !== 1) return false;
   if (state.stageFilter.startsWith("stage:") && match.stageId !== Number(state.stageFilter.split(":")[1])) return false;
   if (state.stageFilter.startsWith("group:") && match.label !== `Group ${state.stageFilter.split(":")[1]}`) return false;
@@ -1272,6 +1335,17 @@ function formatKickoff(date) {
     date: dateFormatter.format(date),
     time: timeFormatter.format(date)
   };
+}
+
+function formatDateParts(date) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: state.timezone
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return [values.year, values.month, values.day];
 }
 
 function getMatchEditDeadline(match) {
