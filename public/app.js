@@ -192,7 +192,6 @@ const TIMEZONE_KEY = "wc2026:timezone";
 const TIMEZONE_CONFIRMED_KEY = "wc2026:timezoneConfirmed";
 const THEME_KEY = "wc2026:theme";
 const SCORE_EDIT_LOCK_MINUTES = 1;
-const MATCH_ONGOING_DURATION_MINUTES = 113;
 const SCORE_EDIT_LOCK_INTERVAL_MS = 15000;
 const OFFICIAL_RESULTS_REFRESH_MS = 60000;
 const THIRD_PLACE_SLOT_ORDER = ["1A", "1B", "1D", "1E", "1G", "1I", "1K", "1L"];
@@ -1275,7 +1274,15 @@ function normalizeOfficialResults(results) {
     if (!Number.isInteger(away) || away < 0) return;
 
     const winnerSide = value?.winnerSide === "home" || value?.winnerSide === "away" ? value.winnerSide : null;
-    normalized[numberKey] = { home, away, winnerSide };
+    normalized[numberKey] = {
+      home,
+      away,
+      winnerSide,
+      fifaStatus: typeof value?.fifaStatus === "string" ? value.fifaStatus : null,
+      fifaPeriod: typeof value?.fifaPeriod === "string" ? value.fifaPeriod : null,
+      fifaMinutes: Number.isFinite(Number(value?.fifaMinutes)) ? Number(value.fifaMinutes) : null,
+      fifaExtraMinutes: Number.isFinite(Number(value?.fifaExtraMinutes)) ? Number(value.fifaExtraMinutes) : null
+    };
   });
 
   return normalized;
@@ -1358,17 +1365,12 @@ function getMatchEditDeadline(match) {
   return match.kickoff.getTime() - SCORE_EDIT_LOCK_MINUTES * 60000;
 }
 
-function getMatchFinalWhistle(match) {
-  return match.kickoff.getTime() + MATCH_ONGOING_DURATION_MINUTES * 60000;
-}
-
 function isMatchLocked(match, now = Date.now()) {
   return now >= getMatchEditDeadline(match);
 }
 
-function isMatchOngoing(match, now = Date.now()) {
-  const kickoffTime = match.kickoff.getTime();
-  return now >= kickoffTime && now < getMatchFinalWhistle(match);
+function isMatchOngoing(match) {
+  return state.officialResults[match.number]?.fifaStatus === "playing";
 }
 
 function refreshMatchEditability() {
@@ -1388,11 +1390,10 @@ function refreshMatchEditability() {
 }
 
 function refreshMatchLiveIndicators() {
-  const now = Date.now();
   document.querySelectorAll("[data-match-live]").forEach((indicator) => {
     const match = matchesById.get(Number(indicator.dataset.matchId));
     if (!match) return;
-    indicator.hidden = !isMatchOngoing(match, now);
+    indicator.hidden = !isMatchOngoing(match);
   });
 }
 

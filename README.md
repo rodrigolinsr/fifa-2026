@@ -59,7 +59,7 @@ The admin area can sync official match status and completed results from FIFA's 
 https://play.fifa.com/json/fantasy/rounds.json
 ```
 
-The sync runs on startup and then on an interval. It saves matches where FIFA reports `status: "playing"` or `status: "complete"`. Scheduled matches are ignored.
+The sync runs on startup and then uses a smart interval. Interval syncs only call FIFA when a match is within 15 minutes of kickoff, currently reported as `playing`, or within 5 minutes after first being observed as `complete`. Scheduled matches are ignored.
 
 FIFA synced results overwrite any manually saved score for the same match, including live in-progress scores. When FIFA later marks that match complete, the final score overwrites the live score. The same `/data/match-results.json` file is served by `GET /admin/api/results`, so the main app consumes the synced scores immediately after the sync writes them.
 

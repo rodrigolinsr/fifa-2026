@@ -14,6 +14,9 @@ const ADMIN_BASIC_PASS = process.env.ADMIN_BASIC_PASS || "";
 const FIFA_ROUNDS_URL = process.env.FIFA_ROUNDS_URL || "https://play.fifa.com/json/fantasy/rounds.json";
 const FIFA_RESULT_SYNC_INTERVAL_MS = parsePositiveInteger(process.env.FIFA_RESULT_SYNC_INTERVAL_MS, 60000, 15000);
 const FIFA_RESULT_SYNC_ENABLED = process.env.FIFA_RESULT_SYNC_ENABLED !== "false";
+const FIFA_SYNC_PRE_MATCH_WINDOW_MS = 15 * 60 * 1000;
+const FIFA_SYNC_POST_COMPLETE_WINDOW_MS = 5 * 60 * 1000;
+const FIFA_SYNC_FALLBACK_MATCH_WINDOW_MS = 4 * 60 * 60 * 1000;
 const adminAuthConfigured = ADMIN_BASIC_USER !== "" || ADMIN_BASIC_PASS !== "";
 const adminAuthEnabled = ADMIN_BASIC_USER !== "" && ADMIN_BASIC_PASS !== "";
 const adminAuthMisconfigured = adminAuthConfigured && !adminAuthEnabled;
@@ -27,7 +30,11 @@ const fifaResultSyncState = {
   lastSuccessAt: null,
   lastError: null,
   lastSummary: null,
-  liveMatches: []
+  liveMatches: [],
+  matchStatuses: {},
+  completedObservedAt: {},
+  lastSchedulerDecision: null,
+  matchSchedule: null
 };
 
 const MIME_TYPES = {
@@ -280,8 +287,8 @@ function startFifaResultSync() {
     console.error("[fifa-sync] Startup sync failed:", error && error.stack ? error.stack : error);
   });
   setInterval(() => {
-    syncFifaResults({ triggeredBy: "interval" }).catch((error) => {
-      console.error("[fifa-sync] Interval sync failed:", error && error.stack ? error.stack : error);
+    runFifaIntervalSync().catch((error) => {
+      console.error("[fifa-sync] Interval scheduler failed:", error && error.stack ? error.stack : error);
     });
   }, FIFA_RESULT_SYNC_INTERVAL_MS);
 }
@@ -296,8 +303,144 @@ async function buildFifaResultSyncStatus() {
     lastSuccessAt: fifaResultSyncState.lastSuccessAt,
     lastError: fifaResultSyncState.lastError,
     lastSummary: fifaResultSyncState.lastSummary,
-    liveMatches: fifaResultSyncState.liveMatches
+    liveMatches: fifaResultSyncState.liveMatches,
+    scheduler: await buildFifaSchedulerStatus()
   };
+}
+
+async function runFifaIntervalSync() {
+  const decision = await getFifaIntervalSyncDecision();
+  fifaResultSyncState.lastSchedulerDecision = decision;
+
+  if (!decision.shouldRun) {
+    console.log(`[fifa-sync] Interval skipped: ${decision.reason}${decision.nextScheduledMatch ? `, next=${formatScheduledMatch(decision.nextScheduledMatch)}` : ""}`);
+    return {
+      ok: true,
+      skipped: true,
+      decision,
+      status: await buildFifaResultSyncStatus()
+    };
+  }
+
+  console.log(`[fifa-sync] Interval running: ${decision.reason}, match=${formatScheduledMatch(decision.triggerMatch)}`);
+  return syncFifaResults({ triggeredBy: "interval" });
+}
+
+async function buildFifaSchedulerStatus() {
+  const decision = await getFifaIntervalSyncDecision().catch((error) => ({
+    shouldRun: false,
+    reason: `scheduler unavailable: ${error?.message || "unknown error"}`,
+    checkedAt: new Date().toISOString(),
+    triggerMatch: null,
+    nextScheduledMatch: null,
+    activeWindowMatches: []
+  }));
+
+  return {
+    intervalSyncWouldRun: decision.shouldRun,
+    intervalSyncReason: decision.reason,
+    nextScheduledMatch: decision.nextScheduledMatch,
+    activeWindowMatches: decision.activeWindowMatches,
+    lastDecision: fifaResultSyncState.lastSchedulerDecision
+  };
+}
+
+async function getFifaIntervalSyncDecision(now = Date.now()) {
+  const schedule = await getMatchSchedule();
+  const activeWindowMatches = [];
+  let triggerMatch = null;
+  let reason = "no match in polling window";
+
+  for (const match of schedule) {
+    const statusInfo = fifaResultSyncState.matchStatuses[String(match.number)] || {};
+    const completedObservedAt = fifaResultSyncState.completedObservedAt[String(match.number)] || null;
+
+    if (statusInfo.status === "playing") {
+      triggerMatch = match;
+      reason = "FIFA still reports a match as playing";
+      activeWindowMatches.push(match);
+      break;
+    }
+
+    if (statusInfo.status === "complete" && completedObservedAt && now <= completedObservedAt + FIFA_SYNC_POST_COMPLETE_WINDOW_MS) {
+      triggerMatch = match;
+      reason = "recently completed match is inside correction window";
+      activeWindowMatches.push(match);
+      break;
+    }
+
+    const windowStart = match.kickoff.getTime() - FIFA_SYNC_PRE_MATCH_WINDOW_MS;
+    const windowEnd = match.kickoff.getTime() + FIFA_SYNC_FALLBACK_MATCH_WINDOW_MS;
+    if (statusInfo.status !== "complete" && now >= windowStart && now <= windowEnd) {
+      triggerMatch = match;
+      reason = "local match schedule is inside polling window";
+      activeWindowMatches.push(match);
+      break;
+    }
+  }
+
+  if (triggerMatch) {
+    schedule.forEach((match) => {
+      if (activeWindowMatches.some((activeMatch) => activeMatch.number === match.number)) return;
+      const statusInfo = fifaResultSyncState.matchStatuses[String(match.number)] || {};
+      const completedObservedAt = fifaResultSyncState.completedObservedAt[String(match.number)] || null;
+      const windowStart = match.kickoff.getTime() - FIFA_SYNC_PRE_MATCH_WINDOW_MS;
+      const windowEnd = match.kickoff.getTime() + FIFA_SYNC_FALLBACK_MATCH_WINDOW_MS;
+      const isActive = statusInfo.status === "playing" ||
+        (statusInfo.status === "complete" && completedObservedAt && now <= completedObservedAt + FIFA_SYNC_POST_COMPLETE_WINDOW_MS) ||
+        (statusInfo.status !== "complete" && now >= windowStart && now <= windowEnd);
+      if (isActive) activeWindowMatches.push(match);
+    });
+  }
+
+  return {
+    shouldRun: Boolean(triggerMatch),
+    reason,
+    checkedAt: new Date(now).toISOString(),
+    triggerMatch: triggerMatch ? summarizeScheduledMatch(triggerMatch) : null,
+    nextScheduledMatch: summarizeScheduledMatch(getNextScheduledMatch(schedule, now)),
+    activeWindowMatches: activeWindowMatches.map(summarizeScheduledMatch).filter(Boolean)
+  };
+}
+
+async function getMatchSchedule() {
+  if (fifaResultSyncState.matchSchedule) {
+    return fifaResultSyncState.matchSchedule;
+  }
+
+  const script = await fs.readFile(path.join(PUBLIC_DIR, "app.js"), "utf8");
+  const matchesCsv = extractCSVConstant(script, "MATCHES_CSV");
+  fifaResultSyncState.matchSchedule = parseCSV(matchesCsv)
+    .map((row) => ({
+      number: Number(row.match_number),
+      label: row.match_label,
+      kickoff: parseKickoff(row.kickoff_at)
+    }))
+    .filter((match) => Number.isInteger(match.number) && match.number > 0 && !Number.isNaN(match.kickoff.getTime()))
+    .sort((a, b) => a.kickoff - b.kickoff || a.number - b.number);
+
+  return fifaResultSyncState.matchSchedule;
+}
+
+function getNextScheduledMatch(schedule, now) {
+  return schedule.find((match) => match.kickoff.getTime() >= now) || null;
+}
+
+function summarizeScheduledMatch(match) {
+  if (!match) return null;
+  return {
+    matchNumber: match.number,
+    label: match.label,
+    kickoffUtc: match.kickoff.toISOString()
+  };
+}
+
+function formatScheduledMatch(match) {
+  if (!match) return "none";
+  const label = match.label || `Match ${match.matchNumber || match.number}`;
+  const number = match.matchNumber || match.number;
+  const kickoff = match.kickoffUtc || (match.kickoff ? match.kickoff.toISOString() : "unknown");
+  return `Match ${number} ${label} at ${kickoff}`;
 }
 
 async function syncFifaResults({ triggeredBy } = {}) {
@@ -323,6 +466,7 @@ async function syncFifaResults({ triggeredBy } = {}) {
     const summary = applyFifaResults(resultsPayload, allMatches, triggeredBy || "unknown");
     const latestSyncedMatch = getLatestSyncedFifaMatch(allMatches);
     const now = new Date().toISOString();
+    updateFifaMatchStatusState(allMatches, Date.parse(now));
 
     if (summary.updatedResults > 0) {
       resultsPayload.updatedAt = now;
@@ -448,6 +592,32 @@ function applyFifaResults(resultsPayload, matches, triggeredBy) {
   return summary;
 }
 
+function updateFifaMatchStatusState(matches, observedAt) {
+  matches.forEach((match) => {
+    const matchNumber = Number(match.id);
+    if (!Number.isInteger(matchNumber) || matchNumber <= 0) return;
+    if (!["playing", "complete", "scheduled"].includes(match.status)) return;
+
+    const key = String(matchNumber);
+    const previous = fifaResultSyncState.matchStatuses[key] || {};
+    fifaResultSyncState.matchStatuses[key] = {
+      status: match.status,
+      period: match.period || null,
+      updatedAt: new Date(observedAt).toISOString()
+    };
+
+    if (match.status === "complete") {
+      if (previous.status === "playing") {
+        fifaResultSyncState.completedObservedAt[key] = observedAt;
+      } else if (previous.status !== "complete") {
+        delete fifaResultSyncState.completedObservedAt[key];
+      }
+    } else {
+      delete fifaResultSyncState.completedObservedAt[key];
+    }
+  });
+}
+
 function getLatestSyncedFifaMatch(matches) {
   return matches
     .filter((match) => match.status === "playing" || match.status === "complete")
@@ -523,6 +693,53 @@ function isSameFifaResult(current, next) {
     (current.fifaPeriod || null) === (next.fifaPeriod || null) &&
     (current.fifaMinutes ?? null) === (next.fifaMinutes ?? null) &&
     (current.fifaExtraMinutes ?? null) === (next.fifaExtraMinutes ?? null);
+}
+
+function extractCSVConstant(script, constantName) {
+  const escapedName = constantName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = script.match(new RegExp(`const ${escapedName} = \`([\\s\\S]*?)\`;`));
+  if (!match) {
+    throw new Error(`Could not find ${constantName} in app catalog.`);
+  }
+
+  return match[1];
+}
+
+function parseCSV(csv) {
+  const rows = csv.trim().split(/\r?\n/).map(parseCSVLine);
+  const headers = rows.shift();
+  return rows.map((row) => Object.fromEntries(headers.map((header, index) => [header, row[index] || ""])));
+}
+
+function parseCSVLine(line) {
+  const cells = [];
+  let current = "";
+  let quoted = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const next = line[index + 1];
+
+    if (char === "\"" && quoted && next === "\"") {
+      current += "\"";
+      index += 1;
+    } else if (char === "\"") {
+      quoted = !quoted;
+    } else if (char === "," && !quoted) {
+      cells.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+
+  cells.push(current);
+  return cells;
+}
+
+function parseKickoff(value) {
+  const normalized = value.replace(" ", "T").replace(/([+-]\d{2})$/, "$1:00");
+  return new Date(normalized);
 }
 
 function sendJSON(res, status, payload) {
