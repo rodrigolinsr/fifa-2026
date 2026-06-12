@@ -735,6 +735,7 @@ function renderMatch(match) {
   const city = citiesById.get(match.cityId);
   const resolvedTeams = resolveMatchTeams(match);
   const score = getDisplayScore(match);
+  const pickReward = getPickReward(match);
   const formatted = formatKickoff(match.kickoff);
   const readOnlyScores = isOfficialScoreMode();
   const matchLocked = isMatchLocked(match);
@@ -749,11 +750,12 @@ function renderMatch(match) {
   const officialResult = isOfficialScoreMode() ? "" : renderOfficialResult(match, resolvedTeams);
 
   return `
-    <article class="match-row" data-match-id="${match.id}">
+    <article class="match-row ${pickReward ? `pick-${pickReward.type}` : ""}" data-match-id="${match.id}">
       <div class="match-topline">
         <span><span class="match-number">Match ${match.number}</span> · ${escapeHTML(formatted.date)} · ${escapeHTML(formatted.time)}</span>
         <div class="match-meta">
           <span>${escapeHTML(city.name)}</span>
+          ${renderPickRewardBadge(pickReward)}
           <span class="match-live-indicator" data-match-live data-match-id="${match.id}" ${matchOngoing ? "" : "hidden"}>
             <span class="live-ball" aria-hidden="true">⚽</span>
             <span>Live</span>
@@ -773,6 +775,53 @@ function renderMatch(match) {
       ${advancerPicker}
       ${officialResult}
     </article>
+  `;
+}
+
+function getPickReward(match) {
+  if (isOfficialScoreMode()) return null;
+
+  const pick = state.scores[match.id];
+  const official = state.officialResults[match.number];
+  if (!pick || !official || official.fifaStatus !== "complete") return null;
+
+  const pickHome = Number(pick.home);
+  const pickAway = Number(pick.away);
+  if (!Number.isInteger(pickHome) || pickHome < 0 || !Number.isInteger(pickAway) || pickAway < 0) return null;
+
+  if (pickHome === official.home && pickAway === official.away) {
+    return {
+      type: "exact",
+      label: "Exact score",
+      emoji: "🎉"
+    };
+  }
+
+  const pickOutcome = getOfficialOutcome(pickHome, pickAway);
+  const officialOutcome = getOfficialOutcome(official.home, official.away);
+  if (pickOutcome === officialOutcome) {
+    return {
+      type: "result",
+      label: "Correct result",
+      emoji: "✅"
+    };
+  }
+
+  return {
+    type: "wrong",
+    label: "Missed",
+    emoji: "❌"
+  };
+}
+
+function renderPickRewardBadge(reward) {
+  if (!reward) return "";
+
+  return `
+    <span class="pick-reward-badge ${reward.type}" title="${escapeHTML(reward.label)}">
+      <span aria-hidden="true">${reward.emoji}</span>
+      <span>${escapeHTML(reward.label)}</span>
+    </span>
   `;
 }
 
