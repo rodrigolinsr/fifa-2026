@@ -676,9 +676,14 @@ function renderMatch(match) {
   const score = getDisplayScore(match);
   const formatted = formatKickoff(match.kickoff);
   const readOnlyScores = isOfficialScoreMode();
+  const matchLocked = isMatchLocked(match);
+  const isOverridden = overrideEditableMatchIds.has(match.id);
+  const unlockableInMyPicks = !readOnlyScores && matchLocked && !isOverridden;
   const scoreInputDisabled = !isMatchEditable(match);
   const matchOngoing = isMatchOngoing(match);
-  const overrideControl = renderOverrideControl(match, readOnlyScores);
+  const homeScoreInput = renderScoreInput(match, "home", score.home ?? "", scoreInputDisabled, unlockableInMyPicks);
+  const awayScoreInput = renderScoreInput(match, "away", score.away ?? "", scoreInputDisabled, unlockableInMyPicks);
+  const overrideControl = renderOverrideControl(match, readOnlyScores, isOverridden);
   const advancerPicker = renderAdvancerPicker(match, resolvedTeams, score, scoreInputDisabled, readOnlyScores);
   const officialResult = isOfficialScoreMode() ? "" : renderOfficialResult(match, resolvedTeams);
 
@@ -697,29 +702,9 @@ function renderMatch(match) {
       <div class="match-main" aria-label="Score for match ${match.number}">
         ${renderTeam(resolvedTeams.home.team, resolvedTeams.home.label)}
         <div class="score-entry">
-          <input
-            type="number"
-            min="0"
-            inputmode="numeric"
-            aria-label="Home score for match ${match.number}"
-            data-score-input
-            data-match-id="${match.id}"
-            data-side="home"
-            value="${escapeHTML(score.home ?? "")}" 
-            ${scoreInputDisabled ? "disabled" : ""}
-          >
+          ${homeScoreInput}
           <span class="score-separator">:</span>
-          <input
-            type="number"
-            min="0"
-            inputmode="numeric"
-            aria-label="Away score for match ${match.number}"
-            data-score-input
-            data-match-id="${match.id}"
-            data-side="away"
-            value="${escapeHTML(score.away ?? "")}"
-            ${scoreInputDisabled ? "disabled" : ""}
-          >
+          ${awayScoreInput}
         </div>
         ${renderTeam(resolvedTeams.away.team, resolvedTeams.away.label, "away")}
       </div>
@@ -730,15 +715,42 @@ function renderMatch(match) {
   `;
 }
 
-function renderOverrideControl(match, readOnlyScores) {
+function renderScoreInput(match, side, value, disabled, showUnlockPopover) {
+  const ariaSide = side === "home" ? "Home" : "Away";
+
+  return `
+    <div class="score-field ${showUnlockPopover ? "locked" : ""}">
+      <input
+        type="number"
+        min="0"
+        inputmode="numeric"
+        aria-label="${ariaSide} score for match ${match.number}"
+        data-score-input
+        data-match-id="${match.id}"
+        data-side="${side}"
+        value="${escapeHTML(value)}"
+        ${disabled ? "disabled" : ""}
+      >
+      ${showUnlockPopover ? `
+        <details class="score-lock">
+          <summary class="score-lock-trigger" aria-label="Locked pick. Open options">🔒</summary>
+          <div class="score-lock-popover">
+            <button class="score-lock-action" type="button" data-override-match="${match.id}" data-focus-side="${side}">Unlock pick</button>
+          </div>
+        </details>
+      ` : ""}
+    </div>
+  `;
+}
+
+function renderOverrideControl(match, readOnlyScores, isOverridden) {
   if (readOnlyScores) return "";
   if (!isMatchLocked(match)) return "";
-
-  const unlocked = overrideEditableMatchIds.has(match.id);
+  if (!isOverridden) return "";
 
   return `
     <div class="match-override-wrap">
-      <button class="match-override-button ${unlocked ? "is-unlocked" : ""}" type="button" data-override-match="${match.id}">${unlocked ? "Lock pick" : "Unlock pick"}</button>
+      <button class="match-override-button is-unlocked" type="button" data-override-match="${match.id}" aria-label="Lock pick" title="Lock pick">✓</button>
     </div>
   `;
 }
@@ -1326,8 +1338,10 @@ function startMatchEditabilityObserver() {
 function handleOverrideMatch(event) {
   const button = event.currentTarget;
   const matchId = Number(button.dataset.overrideMatch);
+  const focusSide = button.dataset.focusSide === "away" ? "away" : "home";
   if (!Number.isInteger(matchId) || matchId <= 0) return;
 
+  const enabling = !overrideEditableMatchIds.has(matchId);
   if (overrideEditableMatchIds.has(matchId)) {
     overrideEditableMatchIds.delete(matchId);
   } else {
@@ -1336,6 +1350,14 @@ function handleOverrideMatch(event) {
 
   renderGroups();
   renderMatches();
+
+  if (enabling) {
+    const selector = `[data-score-input][data-match-id="${matchId}"][data-side="${focusSide}"]`;
+    const target = document.querySelector(selector);
+    if (target) {
+      target.focus();
+    }
+  }
 }
 
 function isMatchEditable(match, now = Date.now()) {
