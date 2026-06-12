@@ -11,9 +11,24 @@ const RESULTS_FILE = process.env.RESULTS_FILE || path.join(DATA_DIR, "match-resu
 const PUBLIC_DIR = path.join(__dirname, "public");
 const ADMIN_BASIC_USER = process.env.ADMIN_BASIC_USER || "";
 const ADMIN_BASIC_PASS = process.env.ADMIN_BASIC_PASS || "";
+const FIFA_ROUNDS_URL = process.env.FIFA_ROUNDS_URL || "https://play.fifa.com/json/fantasy/rounds.json";
+const FIFA_RESULT_SYNC_INTERVAL_MS = parsePositiveInteger(process.env.FIFA_RESULT_SYNC_INTERVAL_MS, 60000, 15000);
+const FIFA_RESULT_SYNC_ENABLED = process.env.FIFA_RESULT_SYNC_ENABLED !== "false";
 const adminAuthConfigured = ADMIN_BASIC_USER !== "" || ADMIN_BASIC_PASS !== "";
 const adminAuthEnabled = ADMIN_BASIC_USER !== "" && ADMIN_BASIC_PASS !== "";
 const adminAuthMisconfigured = adminAuthConfigured && !adminAuthEnabled;
+const FIFA_SOURCE = "fifa";
+const MANUAL_SOURCE = "manual";
+
+const fifaResultSyncState = {
+  enabled: FIFA_RESULT_SYNC_ENABLED,
+  syncing: false,
+  lastSyncAt: null,
+  lastSuccessAt: null,
+  lastError: null,
+  lastSummary: null,
+  liveMatches: []
+};
 
 const MIME_TYPES = {
   ".css": "text/css; charset=utf-8",
@@ -82,6 +97,7 @@ server.listen(PORT, "0.0.0.0", () => {
   ensureDataFile().catch((error) => {
     console.error("[startup] Could not prepare data file:", error && error.stack ? error.stack : error);
   });
+  startFifaResultSync();
 });
 
 async function handleAdminApi(req, res, pathname, method) {
@@ -94,6 +110,17 @@ async function handleAdminApi(req, res, pathname, method) {
   if (method === "GET" && apiPath === "/results") {
     const payload = await readResults();
     return sendJSON(res, 200, payload);
+  }
+
+  if (method === "GET" && apiPath === "/fifa/status") {
+    const payload = await buildFifaResultSyncStatus();
+    return sendJSON(res, 200, payload);
+  }
+
+  if (method === "POST" && apiPath === "/fifa/sync") {
+    const payload = await syncFifaResults({ triggeredBy: "admin" });
+    const status = payload.ok ? 200 : 503;
+    return sendJSON(res, status, payload);
   }
 
   const resultMatch = apiPath.match(/^\/results\/(\d+)$/);
@@ -115,6 +142,7 @@ async function handleAdminApi(req, res, pathname, method) {
     payload.results[String(matchNumber)] = {
       home: homeScore,
       away: awayScore,
+      source: MANUAL_SOURCE,
       updatedAt: new Date().toISOString()
     };
     payload.updatedAt = new Date().toISOString();
@@ -241,6 +269,258 @@ async function writeResults(payload) {
   await fs.rename(tempPath, RESULTS_FILE);
 }
 
+function startFifaResultSync() {
+  if (!FIFA_RESULT_SYNC_ENABLED) {
+    console.log("[startup] FIFA result sync disabled by FIFA_RESULT_SYNC_ENABLED=false");
+    return;
+  }
+
+  console.log(`[startup] FIFA result sync enabled from ${FIFA_ROUNDS_URL}`);
+  syncFifaResults({ triggeredBy: "startup" }).catch((error) => {
+    console.error("[fifa-sync] Startup sync failed:", error && error.stack ? error.stack : error);
+  });
+  setInterval(() => {
+    syncFifaResults({ triggeredBy: "interval" }).catch((error) => {
+      console.error("[fifa-sync] Interval sync failed:", error && error.stack ? error.stack : error);
+    });
+  }, FIFA_RESULT_SYNC_INTERVAL_MS);
+}
+
+async function buildFifaResultSyncStatus() {
+  return {
+    enabled: fifaResultSyncState.enabled,
+    syncing: fifaResultSyncState.syncing,
+    url: FIFA_ROUNDS_URL,
+    intervalMs: FIFA_RESULT_SYNC_INTERVAL_MS,
+    lastSyncAt: fifaResultSyncState.lastSyncAt,
+    lastSuccessAt: fifaResultSyncState.lastSuccessAt,
+    lastError: fifaResultSyncState.lastError,
+    lastSummary: fifaResultSyncState.lastSummary,
+    liveMatches: fifaResultSyncState.liveMatches
+  };
+}
+
+async function syncFifaResults({ triggeredBy } = {}) {
+  if (fifaResultSyncState.syncing) {
+    return {
+      ok: false,
+      error: "FIFA result sync is already running.",
+      status: await buildFifaResultSyncStatus()
+    };
+  }
+
+  fifaResultSyncState.syncing = true;
+  fifaResultSyncState.lastSyncAt = new Date().toISOString();
+  fifaResultSyncState.lastError = null;
+  console.log(`[fifa-sync] Running sync triggered by ${triggeredBy || "unknown"}`);
+
+  try {
+    const [rounds, resultsPayload] = await Promise.all([
+      fetchFifaRounds(),
+      readResults()
+    ]);
+    const allMatches = flattenFifaRoundMatches(rounds);
+    const summary = applyFifaResults(resultsPayload, allMatches, triggeredBy || "unknown");
+    const latestSyncedMatch = getLatestSyncedFifaMatch(allMatches);
+    const now = new Date().toISOString();
+
+    if (summary.updatedResults > 0) {
+      resultsPayload.updatedAt = now;
+      await writeResults(resultsPayload);
+    }
+
+    fifaResultSyncState.liveMatches = allMatches
+      .filter((match) => match.status === "playing")
+      .map(normalizeFifaLiveMatch);
+    fifaResultSyncState.lastSuccessAt = now;
+    fifaResultSyncState.lastSummary = {
+      ...summary,
+      latestSyncedMatch
+    };
+    fifaResultSyncState.syncing = false;
+    console.log(`[fifa-sync] Complete: updated=${summary.updatedResults}, unchanged=${summary.unchangedResults}, playing=${summary.playingMatches}, complete=${summary.completedMatches}, latest=${formatFifaSyncLogMatch(latestSyncedMatch)}`);
+
+    return {
+      ok: true,
+      summary: fifaResultSyncState.lastSummary,
+      status: await buildFifaResultSyncStatus()
+    };
+  } catch (error) {
+    const message = error && error.message ? error.message : "FIFA result sync failed.";
+    fifaResultSyncState.lastError = message;
+    fifaResultSyncState.syncing = false;
+    return {
+      ok: false,
+      error: message,
+      status: await buildFifaResultSyncStatus()
+    };
+  } finally {
+    fifaResultSyncState.syncing = false;
+  }
+}
+
+async function fetchFifaRounds() {
+  const response = await fetch(FIFA_ROUNDS_URL, {
+    headers: {
+      "Accept": "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`FIFA rounds endpoint returned HTTP ${response.status}.`);
+  }
+
+  const payload = await response.json();
+  if (!Array.isArray(payload)) {
+    throw new Error("FIFA rounds endpoint did not return an array.");
+  }
+
+  return payload;
+}
+
+function flattenFifaRoundMatches(rounds) {
+  return rounds.flatMap((round) =>
+    (Array.isArray(round.tournaments) ? round.tournaments : []).map((match) => ({
+      ...match,
+      roundId: round.id,
+      stage: round.stage || null
+    }))
+  );
+}
+
+function applyFifaResults(resultsPayload, matches, triggeredBy) {
+  const summary = {
+    triggeredBy,
+    checkedAt: new Date().toISOString(),
+    totalMatches: matches.length,
+    completedMatches: 0,
+    playingMatches: 0,
+    scheduledMatches: 0,
+    updatedResults: 0,
+    unchangedResults: 0,
+    skippedInvalid: 0
+  };
+
+  matches.forEach((match) => {
+    if (match.status === "playing") {
+      summary.playingMatches += 1;
+    } else if (match.status === "scheduled") {
+      summary.scheduledMatches += 1;
+      return;
+    } else if (match.status === "complete") {
+      summary.completedMatches += 1;
+    } else {
+      return;
+    }
+
+    const normalized = normalizeFifaScoredResult(match);
+    if (!normalized) {
+      summary.skippedInvalid += 1;
+      return;
+    }
+
+    const next = {
+      home: normalized.home,
+      away: normalized.away,
+      source: FIFA_SOURCE,
+      winnerSide: normalized.winnerSide,
+      fifaStatus: match.status,
+      fifaPeriod: match.period || null,
+      fifaMinutes: Number.isFinite(Number(match.minutes)) ? Number(match.minutes) : null,
+      fifaExtraMinutes: Number.isFinite(Number(match.extraMinutes)) ? Number(match.extraMinutes) : null,
+      updatedAt: new Date().toISOString()
+    };
+
+    const current = resultsPayload.results[String(normalized.matchNumber)];
+    if (current && isSameFifaResult(current, next)) {
+      summary.unchangedResults += 1;
+      return;
+    }
+
+    resultsPayload.results[String(normalized.matchNumber)] = next;
+    summary.updatedResults += 1;
+  });
+
+  return summary;
+}
+
+function getLatestSyncedFifaMatch(matches) {
+  return matches
+    .filter((match) => match.status === "playing" || match.status === "complete")
+    .map((match) => ({
+      matchNumber: Number(match.id),
+      status: match.status,
+      date: match.date || null,
+      timestamp: Number.isNaN(new Date(match.date || "").getTime()) ? 0 : new Date(match.date).getTime(),
+      homeName: match.homeSquadName || "Home",
+      awayName: match.awaySquadName || "Away",
+      homeAbbr: match.homeSquadAbbr || null,
+      awayAbbr: match.awaySquadAbbr || null,
+      homeScore: Number.isInteger(Number(match.homeScore)) ? Number(match.homeScore) : null,
+      awayScore: Number.isInteger(Number(match.awayScore)) ? Number(match.awayScore) : null
+    }))
+    .filter((match) => Number.isInteger(match.matchNumber) && match.homeScore !== null && match.awayScore !== null)
+    .sort((a, b) => b.timestamp - a.timestamp || b.matchNumber - a.matchNumber)[0] || null;
+}
+
+function formatFifaSyncLogMatch(match) {
+  if (!match) return "none";
+  const home = match.homeAbbr || match.homeName;
+  const away = match.awayAbbr || match.awayName;
+  return `Match ${match.matchNumber} ${home} ${match.homeScore}-${match.awayScore} ${away} (${match.status})`;
+}
+
+function normalizeFifaScoredResult(match) {
+  const matchNumber = Number(match.id);
+  const home = Number(match.homeScore);
+  const away = Number(match.awayScore);
+  if (!Number.isInteger(matchNumber) || matchNumber <= 0) return null;
+  if (!Number.isInteger(home) || home < 0) return null;
+  if (!Number.isInteger(away) || away < 0) return null;
+
+  return {
+    matchNumber,
+    home,
+    away,
+    winnerSide: getScoreWinnerSide(home, away)
+  };
+}
+
+function normalizeFifaLiveMatch(match) {
+  return {
+    matchNumber: Number(match.id),
+    period: match.period || null,
+    minutes: Number.isFinite(Number(match.minutes)) ? Number(match.minutes) : null,
+    extraMinutes: Number.isFinite(Number(match.extraMinutes)) ? Number(match.extraMinutes) : null,
+    homeName: match.homeSquadName || null,
+    awayName: match.awaySquadName || null,
+    homeAbbr: match.homeSquadAbbr || null,
+    awayAbbr: match.awaySquadAbbr || null,
+    homeScore: Number.isInteger(Number(match.homeScore)) ? Number(match.homeScore) : null,
+    awayScore: Number.isInteger(Number(match.awayScore)) ? Number(match.awayScore) : null,
+    venueName: match.venueName || null,
+    venueCity: match.venueCity || null,
+    date: match.date || null
+  };
+}
+
+function getScoreWinnerSide(home, away) {
+  if (home > away) return "home";
+  if (away > home) return "away";
+  return null;
+}
+
+function isSameFifaResult(current, next) {
+  return current.source === FIFA_SOURCE &&
+    current.home === next.home &&
+    current.away === next.away &&
+    (current.winnerSide || null) === (next.winnerSide || null) &&
+    (current.fifaStatus || null) === (next.fifaStatus || null) &&
+    (current.fifaPeriod || null) === (next.fifaPeriod || null) &&
+    (current.fifaMinutes ?? null) === (next.fifaMinutes ?? null) &&
+    (current.fifaExtraMinutes ?? null) === (next.fifaExtraMinutes ?? null);
+}
+
 function sendJSON(res, status, payload) {
   sendText(res, status, `${JSON.stringify(payload)}\n`, "application/json; charset=utf-8", "no-store");
 }
@@ -288,6 +568,12 @@ function toScore(value) {
   if (typeof value === "number" && Number.isInteger(value) && value >= 0) return value;
   if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
   return null;
+}
+
+function parsePositiveInteger(value, fallback, minimum) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < minimum) return fallback;
+  return parsed;
 }
 
 function requiresAdminAuth(pathname, method) {

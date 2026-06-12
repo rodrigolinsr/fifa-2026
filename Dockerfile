@@ -10,9 +10,7 @@ COPY server.js /app/server.js
 RUN version="${APP_VERSION:-$(date +%s)}" \
   && sed -i "s#styles.css#styles.css?v=${version}#g; s#app.js#app.js?v=${version}#g" /app/public/index.html
 
-RUN mkdir -p /data && chown -R node:node /app /data
-
-USER node
+RUN mkdir -p /data
 
 EXPOSE 8080
 

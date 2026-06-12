@@ -51,6 +51,37 @@ Image/font assets can still be cached for a short period because they are not th
 
 If a browser had already cached an older `index.html` from before this mechanism existed, it may need one hard reload. After that, new deployments should invalidate the CSS and JavaScript URLs automatically.
 
+## FIFA results sync
+
+The admin area can sync official match status and completed results from FIFA's rounds feed:
+
+```txt
+https://play.fifa.com/json/fantasy/rounds.json
+```
+
+The sync runs on startup and then on an interval. It saves matches where FIFA reports `status: "playing"` or `status: "complete"`. Scheduled matches are ignored.
+
+FIFA synced results overwrite any manually saved score for the same match, including live in-progress scores. When FIFA later marks that match complete, the final score overwrites the live score. The same `/data/match-results.json` file is served by `GET /admin/api/results`, so the main app consumes the synced scores immediately after the sync writes them.
+
+Optional environment variables:
+
+- `FIFA_ROUNDS_URL`: defaults to `https://play.fifa.com/json/fantasy/rounds.json`
+- `FIFA_RESULT_SYNC_ENABLED`: defaults to `true`; set `false` to disable background sync
+- `FIFA_RESULT_SYNC_INTERVAL_MS`: defaults to `60000` (1 minute)
+
+Admin endpoints:
+
+- `GET /admin/api/fifa/status`
+- `POST /admin/api/fifa/sync`
+
+```sh
+docker compose up --build
+curl http://localhost:8080/admin/api/fifa/status
+curl -X POST http://localhost:8080/admin/api/fifa/sync
+```
+
+At the moment the FIFA feed includes the group-stage matches and exposes knockout round containers with empty match lists until FIFA populates those rounds.
+
 ## Coolify
 
 ### Option 1: Deploy the Docker image
@@ -68,7 +99,7 @@ Coolify settings:
 - Internal port: `8080`
 - Healthcheck path: `/healthz`
 - Volumes: mount a persistent volume to `/data` (required for admin results persistence)
-- Environment variables: none required
+- Environment variables: none required; set `FIFA_RESULT_SYNC_ENABLED=false` if you want manual-only mode
 
 The GHCR package must be public if you want Coolify to pull it without registry authentication.
 

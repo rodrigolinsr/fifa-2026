@@ -24,6 +24,22 @@
 
       <section class="panel">
         <div class="results-header">
+          <div>
+            <h2>FIFA results sync</h2>
+            <p class="section-note">Official results from the FIFA rounds feed. Synced results overwrite saved scores.</p>
+          </div>
+          <button type="button" id="syncFifaButton">Sync now</button>
+        </div>
+        <div class="sync-grid" id="fifaStatus">
+          <div class="sync-card">
+            <span>Status</span>
+            <strong>Loading...</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="results-header">
           <h2>All matches</h2>
           <p id="updatedAt">Last update: --</p>
         </div>

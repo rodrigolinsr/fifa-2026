@@ -10,6 +10,9 @@ services:
       DATA_DIR: /data
       ADMIN_BASIC_USER: "${ADMIN_BASIC_USER:-}"
       ADMIN_BASIC_PASS: "${ADMIN_BASIC_PASS:-}"
+      FIFA_ROUNDS_URL: "${FIFA_ROUNDS_URL:-https://play.fifa.com/json/fantasy/rounds.json}"
+      FIFA_RESULT_SYNC_ENABLED: "${FIFA_RESULT_SYNC_ENABLED:-true}"
+      FIFA_RESULT_SYNC_INTERVAL_MS: "${FIFA_RESULT_SYNC_INTERVAL_MS:-60000}"
     ports:
       - "${APP_PORT:-8080}:8080"
     healthcheck:

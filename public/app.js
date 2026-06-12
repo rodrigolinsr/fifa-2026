@@ -1077,6 +1077,11 @@ function getKnockoutOutcome(matchNumber, visited = new Set()) {
   if (scoreWinner === "home") return { winner: resolvedTeams.home.team, loser: resolvedTeams.away.team };
   if (scoreWinner === "away") return { winner: resolvedTeams.away.team, loser: resolvedTeams.home.team };
 
+  if (isOfficialScoreMode() && scoreWinner === "tie") {
+    if (score?.winnerSide === "home") return { winner: resolvedTeams.home.team, loser: resolvedTeams.away.team };
+    if (score?.winnerSide === "away") return { winner: resolvedTeams.away.team, loser: resolvedTeams.home.team };
+  }
+
   if (!isOfficialScoreMode()) {
     const selectedAdvancer = state.advancers[match.id];
     if (selectedAdvancer === "home") return { winner: resolvedTeams.home.team, loser: resolvedTeams.away.team };
@@ -1269,7 +1274,8 @@ function normalizeOfficialResults(results) {
     if (!Number.isInteger(home) || home < 0) return;
     if (!Number.isInteger(away) || away < 0) return;
 
-    normalized[numberKey] = { home, away };
+    const winnerSide = value?.winnerSide === "home" || value?.winnerSide === "away" ? value.winnerSide : null;
+    normalized[numberKey] = { home, away, winnerSide };
   });
 
   return normalized;

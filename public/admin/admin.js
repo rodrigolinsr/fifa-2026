@@ -2,6 +2,8 @@
 
 const elements = {
   refreshButton: document.querySelector("#refreshButton"),
+  syncFifaButton: document.querySelector("#syncFifaButton"),
+  fifaStatus: document.querySelector("#fifaStatus"),
   status: document.querySelector("#status"),
   matchesBody: document.querySelector("#matchesBody"),
   updatedAt: document.querySelector("#updatedAt")
@@ -10,7 +12,8 @@ const elements = {
 const state = {
   matches: [],
   results: {},
-  updatedAt: null
+  updatedAt: null,
+  fifaStatus: null
 };
 
 init();
@@ -18,6 +21,10 @@ init();
 function init() {
   elements.refreshButton.addEventListener("click", () => {
     loadData();
+  });
+
+  elements.syncFifaButton.addEventListener("click", () => {
+    syncFifa();
   });
 
   elements.matchesBody.addEventListener("click", handleTableClick);
@@ -29,16 +36,48 @@ async function loadData() {
   setStatus("Loading...");
 
   try {
-    const [matches, payload] = await Promise.all([loadMatchCatalog(), loadResults()]);
+    const [matches, payload, fifaStatus] = await Promise.all([loadMatchCatalog(), loadResults(), loadFifaStatus()]);
     state.matches = matches;
     state.results = payload.results || {};
     state.updatedAt = payload.updatedAt || null;
+    state.fifaStatus = fifaStatus;
 
     renderMatchTable();
+    renderFifaStatus();
     updateUpdatedAt(state.updatedAt);
     setStatus("Ready.");
   } catch {
     setStatus("Could not load matches or saved results.");
+  }
+}
+
+async function syncFifa() {
+  setStatus("Syncing FIFA results...");
+  elements.syncFifaButton.disabled = true;
+
+  try {
+    const response = await fetch("/admin/api/fifa/sync", {
+      method: "POST",
+      cache: "no-store"
+    });
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok || !payload.ok) {
+      const error = payload.error || "Could not sync FIFA results.";
+      state.fifaStatus = payload.status || state.fifaStatus;
+      renderFifaStatus();
+      setStatus(error);
+      return;
+    }
+
+    state.fifaStatus = payload.status || state.fifaStatus;
+    const summary = payload.summary || {};
+    setStatus(`FIFA sync complete. Updated ${summary.updatedResults || 0} result(s).`);
+    await loadData();
+  } catch {
+    setStatus("Could not sync FIFA results.");
+  } finally {
+    elements.syncFifaButton.disabled = false;
   }
 }
 
@@ -123,6 +162,19 @@ async function loadResults() {
   return response.json();
 }
 
+async function loadFifaStatus() {
+  const response = await fetch("/admin/api/fifa/status", {
+    method: "GET",
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error("Could not load FIFA sync status");
+  }
+
+  return response.json();
+}
+
 async function loadMatchCatalog() {
   const response = await fetch("/app.js", { cache: "no-store" });
   if (!response.ok) {
@@ -170,6 +222,7 @@ function renderMatchTable() {
       const home = saved.home ?? "";
       const away = saved.away ?? "";
       const updatedAt = saved.updatedAt ? formatDateTime(saved.updatedAt) : "--";
+      const source = getResultSource(saved);
 
       return `
       <tr>
@@ -189,7 +242,7 @@ function renderMatchTable() {
             <input type="number" min="0" inputmode="numeric" data-score-input data-side="away" data-match-number="${match.number}" value="${escapeHTML(away)}" aria-label="Away score match ${match.number} (${escapeHTML(match.awayName)})">
             <span class="team-near away">${escapeHTML(match.awayName)}</span>
           </div>
-          <small class="updated">Updated: ${escapeHTML(updatedAt)}</small>
+          <small class="updated">Updated: ${escapeHTML(updatedAt)} · ${source}</small>
         </td>
         <td>
           <div class="row-actions">
@@ -203,12 +256,64 @@ function renderMatchTable() {
     .join("");
 }
 
+function renderFifaStatus() {
+  const status = state.fifaStatus;
+  if (!status) {
+    elements.fifaStatus.innerHTML = renderStatusCard("Status", "Unavailable");
+    return;
+  }
+
+  const enabled = status.enabled ? (status.syncing ? "Syncing" : "Enabled") : "Background disabled";
+  const summary = status.lastSummary || {};
+  const lastError = status.lastError || "None";
+  const liveMatches = Array.isArray(status.liveMatches) ? status.liveMatches : [];
+
+  elements.syncFifaButton.disabled = status.syncing;
+  elements.fifaStatus.innerHTML = [
+    renderStatusCard("Sync", enabled),
+    renderStatusCard("Last success", formatDateTime(status.lastSuccessAt)),
+    renderStatusCard("Completed", `${summary.completedMatches || 0} match(es)`),
+    renderStatusCard("Live", `${liveMatches.length} match(es)`),
+    renderStatusCard("Updated", `${summary.updatedResults || 0} result(s)`),
+    liveMatches.length ? renderStatusCard("Live now", formatLiveMatches(liveMatches), "wide") : "",
+    renderStatusCard("Last error", lastError, lastError === "None" ? "" : "wide")
+  ].join("");
+}
+
+function formatLiveMatches(liveMatches) {
+  return liveMatches.map((match) => {
+    const minute = Number.isInteger(match.minutes) ? `${match.minutes}'` : "Live";
+    const home = match.homeAbbr || match.homeName || "Home";
+    const away = match.awayAbbr || match.awayName || "Away";
+    const homeScore = Number.isInteger(match.homeScore) ? match.homeScore : "-";
+    const awayScore = Number.isInteger(match.awayScore) ? match.awayScore : "-";
+    return `Match ${match.matchNumber} · ${home} ${homeScore}-${awayScore} ${away} · ${minute}`;
+  }).join(" | ");
+}
+
+function renderStatusCard(label, value, modifier = "") {
+  return `
+    <div class="sync-card ${modifier}">
+      <span>${escapeHTML(label)}</span>
+      <strong>${escapeHTML(value || "--")}</strong>
+    </div>
+  `;
+}
+
+function getResultSource(saved) {
+  if (saved.source === "fifa") return "FIFA";
+  if (saved.source && saved.source !== "manual") return "Legacy automated";
+  if (saved.home !== undefined || saved.away !== undefined) return "Manual";
+  return "No result";
+}
+
 function updateUpdatedAt(value) {
   const label = value ? formatDateTime(value) : "--";
   elements.updatedAt.textContent = `Last update: ${label}`;
 }
 
 function formatDateTime(value) {
+  if (!value) return "--";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "--";
 
