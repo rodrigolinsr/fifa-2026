@@ -755,7 +755,6 @@ function renderMatch(match) {
       <div class="match-topline">
         <span><span class="match-number">Match ${match.number}</span> · ${escapeHTML(formatted.date)} · ${escapeHTML(formatted.time)}</span>
         <div class="match-meta">
-          <span>${escapeHTML(city.name)}</span>
           ${renderPickRewardBadge(pickReward)}
           <span class="match-live-indicator" data-match-live data-match-id="${match.id}" ${matchOngoing ? "" : "hidden"}>
             <span class="live-ball" aria-hidden="true">⚽</span>
@@ -771,6 +770,10 @@ function renderMatch(match) {
           ${awayScoreInput}
         </div>
         ${renderTeam(resolvedTeams.away.team, resolvedTeams.away.label, "away")}
+      </div>
+      <div class="match-location">
+        <span class="match-city"><span aria-hidden="true">📍</span><span>${escapeHTML(city.name)}</span></span>
+        <span class="match-venue"><span>${escapeHTML(city.venue)}</span><span aria-hidden="true">🏟️</span></span>
       </div>
       ${overrideControl}
       ${advancerPicker}

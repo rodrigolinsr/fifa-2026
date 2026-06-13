@@ -634,6 +634,42 @@ input {
   min-width: 0;
 }
 
+.match-location {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  max-width: 100%;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.match-city,
+.match-venue {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.match-city {
+  justify-content: flex-start;
+}
+
+.match-venue {
+  justify-content: flex-end;
+}
+
+.match-city span:last-child,
+.match-venue span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .match-live-indicator {
   display: inline-flex;
   align-items: center;
