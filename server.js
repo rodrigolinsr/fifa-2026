@@ -410,12 +410,21 @@ async function getMatchSchedule() {
 
   const script = await fs.readFile(path.join(PUBLIC_DIR, "app.js"), "utf8");
   const matchesCsv = extractCSVConstant(script, "MATCHES_CSV");
+  const teamsCsv = extractCSVConstant(script, "TEAMS_CSV");
+  const teamsById = new Map(parseCSV(teamsCsv).map((row) => [Number(row.id), row]));
   fifaResultSyncState.matchSchedule = parseCSV(matchesCsv)
-    .map((row) => ({
-      number: Number(row.match_number),
-      label: row.match_label,
-      kickoff: parseKickoff(row.kickoff_at)
-    }))
+    .map((row) => {
+      const homeTeam = teamsById.get(Number(row.home_team_id));
+      const awayTeam = teamsById.get(Number(row.away_team_id));
+      return {
+        number: Number(row.match_number),
+        fifaMatchId: row.fifa_match_id ? Number(row.fifa_match_id) : null,
+        label: row.match_label,
+        kickoff: parseKickoff(row.kickoff_at),
+        homeCode: homeTeam?.fifa_code || null,
+        awayCode: awayTeam?.fifa_code || null
+      };
+    })
     .filter((match) => Number.isInteger(match.number) && match.number > 0 && !Number.isNaN(match.kickoff.getTime()))
     .sort((a, b) => a.kickoff - b.kickoff || a.number - b.number);
 
@@ -462,19 +471,19 @@ async function syncFifaResults({ triggeredBy } = {}) {
       fetchFifaRounds(),
       readResults()
     ]);
-    const allMatches = flattenFifaRoundMatches(rounds);
+    const allMatches = await mapFifaMatchesToLocalMatches(flattenFifaRoundMatches(rounds));
     const summary = applyFifaResults(resultsPayload, allMatches, triggeredBy || "unknown");
     const latestSyncedMatch = getLatestSyncedFifaMatch(allMatches);
     const now = new Date().toISOString();
     updateFifaMatchStatusState(allMatches, Date.parse(now));
 
-    if (summary.updatedResults > 0) {
+    if (summary.updatedResults > 0 || summary.removedLegacyMismapped > 0) {
       resultsPayload.updatedAt = now;
       await writeResults(resultsPayload);
     }
 
     fifaResultSyncState.liveMatches = allMatches
-      .filter((match) => match.status === "playing")
+      .filter((match) => match.status === "playing" && Number.isInteger(Number(match.localMatchNumber)))
       .map(normalizeFifaLiveMatch);
     fifaResultSyncState.lastSuccessAt = now;
     fifaResultSyncState.lastSummary = {
@@ -536,6 +545,76 @@ function flattenFifaRoundMatches(rounds) {
   );
 }
 
+async function mapFifaMatchesToLocalMatches(matches) {
+  const schedule = await getMatchSchedule();
+  const scheduleByFifaId = new Map(
+    schedule
+      .filter((match) => Number.isInteger(match.fifaMatchId))
+      .map((match) => [match.fifaMatchId, match])
+  );
+
+  return matches.map((match) => {
+    const localMatch = resolveLocalMatchForFifaMatch(match, schedule, scheduleByFifaId);
+    return {
+      ...match,
+      localMatch,
+      localMatchNumber: localMatch?.number || null,
+      mappingSource: localMatch?.mappingSource || null
+    };
+  });
+}
+
+function resolveLocalMatchForFifaMatch(match, schedule, scheduleByFifaId) {
+  const fifaMatchId = Number(match.id);
+  if (Number.isInteger(fifaMatchId) && scheduleByFifaId.has(fifaMatchId)) {
+    return {
+      ...scheduleByFifaId.get(fifaMatchId),
+      mappingSource: "fifa_match_id"
+    };
+  }
+
+  const kickoff = new Date(match.date || "");
+  const kickoffTime = kickoff.getTime();
+  if (Number.isNaN(kickoffTime)) return null;
+
+  const homeCode = normalizeFifaTeamCode(match.homeSquadAbbr);
+  const awayCode = normalizeFifaTeamCode(match.awaySquadAbbr);
+  if (homeCode && awayCode) {
+    const teamMatch = schedule.find((candidate) =>
+      candidate.homeCode === homeCode &&
+      candidate.awayCode === awayCode &&
+      Math.abs(candidate.kickoff.getTime() - kickoffTime) <= 10 * 60 * 1000
+    );
+    if (teamMatch) {
+      return {
+        ...teamMatch,
+        mappingSource: "teams_and_kickoff"
+      };
+    }
+  }
+
+  const kickoffMatches = schedule.filter((candidate) =>
+    Math.abs(candidate.kickoff.getTime() - kickoffTime) <= 2 * 60 * 1000
+  );
+  if (kickoffMatches.length === 1) {
+    return {
+      ...kickoffMatches[0],
+      mappingSource: "kickoff_only"
+    };
+  }
+
+  return null;
+}
+
+function normalizeFifaTeamCode(value) {
+  const code = String(value || "").trim().toUpperCase();
+  if (code === "CZE") return "CZE";
+  if (code === "TUR") return "TUR";
+  if (code === "CUW") return "CUR";
+  if (code === "KSA") return "KSA";
+  return code || null;
+}
+
 function applyFifaResults(resultsPayload, matches, triggeredBy) {
   const summary = {
     triggeredBy,
@@ -546,7 +625,9 @@ function applyFifaResults(resultsPayload, matches, triggeredBy) {
     scheduledMatches: 0,
     updatedResults: 0,
     unchangedResults: 0,
-    skippedInvalid: 0
+    skippedInvalid: 0,
+    skippedUnmapped: 0,
+    removedLegacyMismapped: 0
   };
 
   matches.forEach((match) => {
@@ -561,6 +642,12 @@ function applyFifaResults(resultsPayload, matches, triggeredBy) {
       return;
     }
 
+    if (!match.localMatchNumber) {
+      summary.skippedUnmapped += 1;
+      console.warn(`[fifa-sync] Skipping unmapped FIFA match id=${match.id} ${match.homeSquadAbbr || match.homeSquadName || "Home"} vs ${match.awaySquadAbbr || match.awaySquadName || "Away"} at ${match.date || "unknown date"}`);
+      return;
+    }
+
     const normalized = normalizeFifaScoredResult(match);
     if (!normalized) {
       summary.skippedInvalid += 1;
@@ -571,6 +658,7 @@ function applyFifaResults(resultsPayload, matches, triggeredBy) {
       home: normalized.home,
       away: normalized.away,
       source: FIFA_SOURCE,
+      fifaMatchId: normalized.fifaMatchId,
       winnerSide: normalized.winnerSide,
       fifaStatus: match.status,
       fifaPeriod: match.period || null,
@@ -579,13 +667,23 @@ function applyFifaResults(resultsPayload, matches, triggeredBy) {
       updatedAt: new Date().toISOString()
     };
 
-    const current = resultsPayload.results[String(normalized.matchNumber)];
+    const localKey = String(normalized.matchNumber);
+    const legacyKey = String(normalized.fifaMatchId);
+    if (legacyKey !== localKey) {
+      const legacy = resultsPayload.results[legacyKey];
+      if (legacy?.source === FIFA_SOURCE && legacy.fifaMatchId === undefined) {
+        delete resultsPayload.results[legacyKey];
+        summary.removedLegacyMismapped += 1;
+      }
+    }
+
+    const current = resultsPayload.results[localKey];
     if (current && isSameFifaResult(current, next)) {
       summary.unchangedResults += 1;
       return;
     }
 
-    resultsPayload.results[String(normalized.matchNumber)] = next;
+    resultsPayload.results[localKey] = next;
     summary.updatedResults += 1;
   });
 
@@ -594,7 +692,7 @@ function applyFifaResults(resultsPayload, matches, triggeredBy) {
 
 function updateFifaMatchStatusState(matches, observedAt) {
   matches.forEach((match) => {
-    const matchNumber = Number(match.id);
+    const matchNumber = Number(match.localMatchNumber);
     if (!Number.isInteger(matchNumber) || matchNumber <= 0) return;
     if (!["playing", "complete", "scheduled"].includes(match.status)) return;
 
@@ -622,7 +720,8 @@ function getLatestSyncedFifaMatch(matches) {
   return matches
     .filter((match) => match.status === "playing" || match.status === "complete")
     .map((match) => ({
-      matchNumber: Number(match.id),
+      matchNumber: Number(match.localMatchNumber),
+      fifaMatchId: Number(match.id),
       status: match.status,
       date: match.date || null,
       timestamp: Number.isNaN(new Date(match.date || "").getTime()) ? 0 : new Date(match.date).getTime(),
@@ -645,15 +744,18 @@ function formatFifaSyncLogMatch(match) {
 }
 
 function normalizeFifaScoredResult(match) {
-  const matchNumber = Number(match.id);
+  const matchNumber = Number(match.localMatchNumber);
+  const fifaMatchId = Number(match.id);
   const home = Number(match.homeScore);
   const away = Number(match.awayScore);
   if (!Number.isInteger(matchNumber) || matchNumber <= 0) return null;
+  if (!Number.isInteger(fifaMatchId) || fifaMatchId <= 0) return null;
   if (!Number.isInteger(home) || home < 0) return null;
   if (!Number.isInteger(away) || away < 0) return null;
 
   return {
     matchNumber,
+    fifaMatchId,
     home,
     away,
     winnerSide: getScoreWinnerSide(home, away)
@@ -662,7 +764,8 @@ function normalizeFifaScoredResult(match) {
 
 function normalizeFifaLiveMatch(match) {
   return {
-    matchNumber: Number(match.id),
+    matchNumber: Number(match.localMatchNumber),
+    fifaMatchId: Number(match.id),
     period: match.period || null,
     minutes: Number.isFinite(Number(match.minutes)) ? Number(match.minutes) : null,
     extraMinutes: Number.isFinite(Number(match.extraMinutes)) ? Number(match.extraMinutes) : null,
@@ -688,6 +791,7 @@ function isSameFifaResult(current, next) {
   return current.source === FIFA_SOURCE &&
     current.home === next.home &&
     current.away === next.away &&
+    (current.fifaMatchId ?? null) === (next.fifaMatchId ?? null) &&
     (current.winnerSide || null) === (next.winnerSide || null) &&
     (current.fifaStatus || null) === (next.fifaStatus || null) &&
     (current.fifaPeriod || null) === (next.fifaPeriod || null) &&
