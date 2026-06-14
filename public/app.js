@@ -853,7 +853,7 @@ function calculateAchievements() {
     if (!official || official.fifaStatus !== "complete") return totals;
 
     totals.completed += 1;
-    totals.possible += 3;
+    totals.possible += 2;
 
     const reward = getPickRewardResult(match);
     if (!reward) {
@@ -862,7 +862,7 @@ function calculateAchievements() {
     }
 
     if (reward.type === "exact") {
-      totals.points += 3;
+      totals.points += 2;
       totals.exact += 1;
     } else if (reward.type === "result") {
       totals.points += 1;
@@ -935,7 +935,7 @@ function renderAchievementModalContent(achievements) {
       <span>${achievements.completed} ${completedLabel} counted</span>
     </div>
     <div class="achievement-rules" aria-label="Point rules">
-      <div><span aria-hidden="true">🎉</span><strong>Exact score</strong><span>3 points each · ${achievements.exact} ${exactLabel}</span></div>
+      <div><span aria-hidden="true">🎉</span><strong>Exact score</strong><span>2 points each · ${achievements.exact} ${exactLabel}</span></div>
       <div><span aria-hidden="true">✅</span><strong>Correct result</strong><span>1 point each · ${achievements.result} ${resultLabel}</span></div>
       <div><span aria-hidden="true">❌</span><strong>Wrong or empty</strong><span>0 points · ${achievements.missed} ${missedLabel}</span></div>
     </div>
