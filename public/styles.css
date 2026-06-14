@@ -322,6 +322,55 @@ input {
   font-weight: 520;
 }
 
+.achievement-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.25;
+}
+
+.achievement-summary[hidden] {
+  display: none;
+}
+
+.achievement-score {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  min-height: 0;
+  padding: 4px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 74%, transparent);
+  color: var(--accent);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.achievement-score:hover {
+  background: color-mix(in srgb, var(--accent-soft) 70%, var(--surface));
+}
+
+.achievement-score:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.achievement-detail {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .score-mode-toggle {
   display: inline-flex;
   gap: 8px;
@@ -349,6 +398,113 @@ input {
   background: color-mix(in srgb, var(--accent-soft) 70%, var(--surface));
   color: var(--accent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+body.modal-open {
+  overflow: hidden;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(0, 0, 0, 0.48);
+}
+
+.modal-backdrop[hidden] {
+  display: none;
+}
+
+.modal-panel {
+  position: relative;
+  width: min(100%, 430px);
+  max-height: min(100%, 620px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.28);
+  padding: 18px;
+}
+
+.modal-panel h2 {
+  margin: 2px 34px 14px 0;
+  font-size: 1.3rem;
+}
+
+.modal-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 1.4rem;
+  line-height: 1;
+}
+
+.achievement-modal-content {
+  display: grid;
+  gap: 12px;
+}
+
+.achievement-total {
+  display: grid;
+  gap: 2px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent-soft) 50%, var(--surface));
+}
+
+.achievement-total strong {
+  color: var(--accent);
+  font-size: 1.35rem;
+}
+
+.achievement-total span,
+.achievement-rules span,
+.achievement-note {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.achievement-rules {
+  display: grid;
+  gap: 8px;
+}
+
+.achievement-rules div {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 8px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.achievement-rules div > span:first-child {
+  grid-row: span 2;
+}
+
+.achievement-rules div > span:last-child {
+  grid-column: 2;
+}
+
+.achievement-note {
+  margin: 0;
+  line-height: 1.45;
 }
 
 .toolbar,

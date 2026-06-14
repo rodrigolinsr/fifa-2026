@@ -341,6 +341,10 @@ const elements = {
   dateFilter: document.querySelector("#dateFilter"),
   stageFilter: document.querySelector("#stageFilter"),
   scoreModeHint: document.querySelector("#scoreModeHint"),
+  achievementSummary: document.querySelector("#achievementSummary"),
+  achievementModal: document.querySelector("#achievementModal"),
+  achievementModalClose: document.querySelector("#achievementModalClose"),
+  achievementModalContent: document.querySelector("#achievementModalContent"),
   scoreSourceButtons: document.querySelectorAll("[data-score-source-btn]"),
   resetScores: document.querySelector("#resetScores"),
   groupsGrid: document.querySelector("#groupsGrid"),
@@ -351,6 +355,7 @@ const elements = {
 
 let matchEditabilityObserver = null;
 const overrideEditableMatchIds = new Set();
+let lastAchievementFocus = null;
 
 init();
 
@@ -453,6 +458,25 @@ function init() {
     localStorage.removeItem(ADVANCER_KEY);
     renderGroups();
     renderMatches();
+  });
+
+  elements.achievementSummary.addEventListener("click", (event) => {
+    const trigger = event.target.closest("[data-achievement-details]");
+    if (trigger) openAchievementModal();
+  });
+
+  elements.achievementModalClose.addEventListener("click", closeAchievementModal);
+
+  elements.achievementModal.addEventListener("click", (event) => {
+    if (event.target === elements.achievementModal) {
+      closeAchievementModal();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !elements.achievementModal.hidden) {
+      closeAchievementModal();
+    }
   });
 }
 
@@ -593,6 +617,8 @@ function renderGroups() {
 }
 
 function renderMatches() {
+  renderAchievements();
+
   const visibleGroupMatches = matches.filter((match) => match.stageId === 1 && matchMatchesFilters(match));
   const visibleKnockoutMatches = matches.filter((match) => match.stageId !== 1 && matchMatchesFilters(match));
   const visibleMatches = [...visibleGroupMatches, ...visibleKnockoutMatches];
@@ -784,7 +810,10 @@ function renderMatch(match) {
 
 function getPickReward(match) {
   if (isOfficialScoreMode()) return null;
+  return getPickRewardResult(match);
+}
 
+function getPickRewardResult(match) {
   const pick = state.scores[match.id];
   const official = state.officialResults[match.number];
   if (!pick || !official || official.fifaStatus !== "complete") return null;
@@ -816,6 +845,102 @@ function getPickReward(match) {
     label: "Missed",
     emoji: "❌"
   };
+}
+
+function calculateAchievements() {
+  return matches.reduce((totals, match) => {
+    const official = state.officialResults[match.number];
+    if (!official || official.fifaStatus !== "complete") return totals;
+
+    totals.completed += 1;
+    totals.possible += 3;
+
+    const reward = getPickRewardResult(match);
+    if (!reward) {
+      totals.missed += 1;
+      return totals;
+    }
+
+    if (reward.type === "exact") {
+      totals.points += 3;
+      totals.exact += 1;
+    } else if (reward.type === "result") {
+      totals.points += 1;
+      totals.result += 1;
+    } else {
+      totals.missed += 1;
+    }
+
+    return totals;
+  }, {
+    points: 0,
+    possible: 0,
+    completed: 0,
+    exact: 0,
+    result: 0,
+    missed: 0
+  });
+}
+
+function renderAchievements() {
+  if (!elements.achievementSummary) return;
+
+  const usingOfficial = isOfficialScoreMode();
+  elements.achievementSummary.hidden = usingOfficial;
+  if (usingOfficial) {
+    elements.achievementSummary.innerHTML = "";
+    return;
+  }
+
+  const achievements = calculateAchievements();
+  const detail = achievements.completed > 0
+    ? `${achievements.exact} exact · ${achievements.result} result · ${achievements.missed} missed`
+    : "No completed matches yet";
+
+  elements.achievementSummary.innerHTML = `
+    <button class="achievement-score" type="button" data-achievement-details aria-label="Open achievements details">
+      <span aria-hidden="true">🏅</span>${achievements.points} / ${achievements.possible} pts
+    </button>
+    <span class="achievement-detail">${escapeHTML(detail)}</span>
+  `;
+}
+
+function openAchievementModal() {
+  const achievements = calculateAchievements();
+  lastAchievementFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  elements.achievementModalContent.innerHTML = renderAchievementModalContent(achievements);
+  elements.achievementModal.hidden = false;
+  document.body.classList.add("modal-open");
+  elements.achievementModalClose.focus();
+}
+
+function closeAchievementModal() {
+  elements.achievementModal.hidden = true;
+  document.body.classList.remove("modal-open");
+  if (lastAchievementFocus) {
+    lastAchievementFocus.focus();
+    lastAchievementFocus = null;
+  }
+}
+
+function renderAchievementModalContent(achievements) {
+  const completedLabel = achievements.completed === 1 ? "finished match" : "finished matches";
+  const missedLabel = achievements.missed === 1 ? "missed pick" : "missed picks";
+  const exactLabel = achievements.exact === 1 ? "hit" : "hits";
+  const resultLabel = achievements.result === 1 ? "hit" : "hits";
+
+  return `
+    <div class="achievement-total">
+      <strong>${achievements.points} / ${achievements.possible} pts</strong>
+      <span>${achievements.completed} ${completedLabel} counted</span>
+    </div>
+    <div class="achievement-rules" aria-label="Point rules">
+      <div><span aria-hidden="true">🎉</span><strong>Exact score</strong><span>3 points each · ${achievements.exact} ${exactLabel}</span></div>
+      <div><span aria-hidden="true">✅</span><strong>Correct result</strong><span>1 point each · ${achievements.result} ${resultLabel}</span></div>
+      <div><span aria-hidden="true">❌</span><strong>Wrong or empty</strong><span>0 points · ${achievements.missed} ${missedLabel}</span></div>
+    </div>
+    <p class="achievement-note">Only matches with completed official results count toward the total. Live and scheduled matches are ignored until they finish.</p>
+  `;
 }
 
 function renderPickRewardBadge(reward) {

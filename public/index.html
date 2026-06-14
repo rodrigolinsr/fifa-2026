@@ -50,6 +50,7 @@
         <div>
           <p class="score-mode-eyebrow">Display Mode</p>
           <p id="scoreModeHint">Using your saved picks for standings and knockout progression.</p>
+          <div class="achievement-summary" id="achievementSummary" hidden></div>
         </div>
         <div class="score-mode-toggle" role="group" aria-label="Choose score source">
           <button class="mode-pill" id="scoreSourceUser" data-score-source-btn="user" type="button">🎯 My picks</button>
@@ -106,5 +107,14 @@
         <div id="matchesContainer"></div>
       </section>
     </main>
+
+    <div class="modal-backdrop" id="achievementModal" hidden>
+      <section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="achievementModalTitle">
+        <button class="modal-close" id="achievementModalClose" type="button" aria-label="Close achievements details">×</button>
+        <p class="score-mode-eyebrow">Achievements</p>
+        <h2 id="achievementModalTitle">Your points</h2>
+        <div class="achievement-modal-content" id="achievementModalContent"></div>
+      </section>
+    </div>
   </body>
 </html>
