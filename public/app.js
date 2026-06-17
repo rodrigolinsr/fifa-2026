@@ -191,6 +191,7 @@ const SCORE_SOURCE_KEY = "wc2026:scoreSource";
 const TIMEZONE_KEY = "wc2026:timezone";
 const TIMEZONE_CONFIRMED_KEY = "wc2026:timezoneConfirmed";
 const THEME_KEY = "wc2026:theme";
+const FILTERS_KEY = "wc2026:filters";
 const SCORE_EDIT_LOCK_MINUTES = 1;
 const SCORE_EDIT_LOCK_INTERVAL_MS = 15000;
 const OFFICIAL_RESULTS_REFRESH_MS = 60000;
@@ -266,10 +267,12 @@ const FALLBACK_TIMEZONES = [
   "Australia/Sydney"
 ];
 
+const savedFilters = readJSON(FILTERS_KEY, {});
+
 const state = {
-  search: "",
-  dateFilter: "all",
-  stageFilter: "all",
+  search: typeof savedFilters.search === "string" ? savedFilters.search.trim().toLowerCase() : "",
+  dateFilter: typeof savedFilters.dateFilter === "string" ? savedFilters.dateFilter : "all",
+  stageFilter: typeof savedFilters.stageFilter === "string" ? savedFilters.stageFilter : "all",
   scores: readJSON(SCORE_KEY, {}),
   advancers: readJSON(ADVANCER_KEY, {}),
   officialResults: {},
@@ -364,6 +367,7 @@ function init() {
   populateTimezoneSelect();
   populateDateFilter();
   populateStageFilter();
+  applyFilterControls();
   applyScoreSourceState();
   renderGroups();
   renderMatches();
@@ -378,6 +382,7 @@ function init() {
     persistTimezone();
     updateTimezoneState();
     populateDateFilter();
+    persistFilters();
     renderGroups();
     renderMatches();
   });
@@ -388,6 +393,7 @@ function init() {
     persistTimezone();
     updateTimezoneState();
     populateDateFilter();
+    persistFilters();
     renderGroups();
     renderMatches();
   });
@@ -420,18 +426,21 @@ function init() {
 
   elements.searchInput.addEventListener("input", () => {
     state.search = elements.searchInput.value.trim().toLowerCase();
+    persistFilters();
     renderGroups();
     renderMatches();
   });
 
   elements.dateFilter.addEventListener("change", () => {
     state.dateFilter = elements.dateFilter.value;
+    persistFilters();
     renderGroups();
     renderMatches();
   });
 
   elements.stageFilter.addEventListener("change", () => {
     state.stageFilter = elements.stageFilter.value;
+    persistFilters();
     renderGroups();
     renderMatches();
   });
@@ -550,12 +559,18 @@ function populateDateFilter() {
     state.dateFilter = "all";
   }
 
-  elements.dateFilter.innerHTML = [
-    `<option value="all">All days</option>`,
-    ...dateOptions.map((option) =>
-      `<option value="${escapeHTML(option.key)}">${escapeHTML(option.label)}</option>`
-    )
-  ].join("");
+  const currentDateKey = getCurrentDateKey();
+  const currentAndFutureOptions = dateOptions.filter((option) => option.key >= currentDateKey);
+  const pastOptions = dateOptions.filter((option) => option.key < currentDateKey);
+  const renderOptions = (options) => options
+    .map((option) => `<option value="${escapeHTML(option.key)}">${escapeHTML(option.label)}</option>`)
+    .join("");
+
+  elements.dateFilter.innerHTML = `
+    <option value="all">All Days</option>
+    ${renderOptions(currentAndFutureOptions)}
+    ${pastOptions.length ? `<option disabled>──────────</option><optgroup label="Past days">${renderOptions(pastOptions)}</optgroup>` : ""}
+  `;
   elements.dateFilter.value = state.dateFilter;
 }
 
@@ -577,8 +592,15 @@ function getMatchDateOptions() {
 }
 
 function getMatchDateKey(match) {
-  return formatDateParts(match.kickoff)
-    .join("-");
+  return formatDateKey(match.kickoff);
+}
+
+function getCurrentDateKey() {
+  return formatDateKey(new Date());
+}
+
+function formatDateKey(date) {
+  return formatDateParts(date).join("-");
 }
 
 function formatMatchDateFilterLabel(date) {
@@ -591,6 +613,10 @@ function formatMatchDateFilterLabel(date) {
 }
 
 function populateStageFilter() {
+  if (!isValidStageFilter(state.stageFilter)) {
+    state.stageFilter = "all";
+  }
+
   const groupOptions = [...new Set(teams.map((team) => team.group))]
     .map((group) => `<option value="group:${group}">Group ${group}</option>`)
     .join("");
@@ -604,6 +630,32 @@ function populateStageFilter() {
     ${groupOptions}
     ${stageOptions}
   `;
+  elements.stageFilter.value = state.stageFilter;
+}
+
+function isValidStageFilter(value) {
+  if (value === "all" || value === "groups") return true;
+  if (value.startsWith("group:")) {
+    return teams.some((team) => value === `group:${team.group}`);
+  }
+  if (value.startsWith("stage:")) {
+    return stages.some((stage) => value === `stage:${stage.id}`);
+  }
+  return false;
+}
+
+function applyFilterControls() {
+  elements.searchInput.value = typeof savedFilters.search === "string" ? savedFilters.search : "";
+  elements.dateFilter.value = state.dateFilter;
+  elements.stageFilter.value = state.stageFilter;
+}
+
+function persistFilters() {
+  localStorage.setItem(FILTERS_KEY, JSON.stringify({
+    search: elements.searchInput.value,
+    dateFilter: state.dateFilter,
+    stageFilter: state.stageFilter
+  }));
 }
 
 function renderGroups() {
