@@ -567,10 +567,13 @@ async function mapFifaMatchesToLocalMatches(matches) {
 function resolveLocalMatchForFifaMatch(match, schedule, scheduleByFifaId) {
   const fifaMatchId = Number(match.id);
   if (Number.isInteger(fifaMatchId) && scheduleByFifaId.has(fifaMatchId)) {
-    return {
-      ...scheduleByFifaId.get(fifaMatchId),
-      mappingSource: "fifa_match_id"
-    };
+    const fifaIdMatch = scheduleByFifaId.get(fifaMatchId);
+    if (isFifaMatchCompatibleWithLocalMatch(match, fifaIdMatch)) {
+      return {
+        ...fifaIdMatch,
+        mappingSource: "fifa_match_id"
+      };
+    }
   }
 
   const kickoff = new Date(match.date || "");
@@ -604,6 +607,22 @@ function resolveLocalMatchForFifaMatch(match, schedule, scheduleByFifaId) {
   }
 
   return null;
+}
+
+function isFifaMatchCompatibleWithLocalMatch(match, localMatch) {
+  if (!localMatch) return false;
+
+  const homeCode = normalizeFifaTeamCode(match.homeSquadAbbr);
+  const awayCode = normalizeFifaTeamCode(match.awaySquadAbbr);
+  if (homeCode && awayCode && localMatch.homeCode && localMatch.awayCode) {
+    return localMatch.homeCode === homeCode && localMatch.awayCode === awayCode;
+  }
+
+  const kickoff = new Date(match.date || "");
+  const kickoffTime = kickoff.getTime();
+  if (Number.isNaN(kickoffTime)) return false;
+
+  return Math.abs(localMatch.kickoff.getTime() - kickoffTime) <= 10 * 60 * 1000;
 }
 
 function normalizeFifaTeamCode(value) {
@@ -671,7 +690,7 @@ function applyFifaResults(resultsPayload, matches, triggeredBy) {
     const legacyKey = String(normalized.fifaMatchId);
     if (legacyKey !== localKey) {
       const legacy = resultsPayload.results[legacyKey];
-      if (legacy?.source === FIFA_SOURCE && legacy.fifaMatchId === undefined) {
+      if (legacy?.source === FIFA_SOURCE && (legacy.fifaMatchId === undefined || legacy.fifaMatchId === normalized.fifaMatchId)) {
         delete resultsPayload.results[legacyKey];
         summary.removedLegacyMismapped += 1;
       }
