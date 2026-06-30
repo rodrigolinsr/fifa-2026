@@ -824,6 +824,7 @@ function renderMatch(match) {
   const matchOngoing = isMatchOngoing(match);
   const homeScoreInput = renderScoreInput(match, "home", score.home ?? "", scoreInputDisabled, unlockableInMyPicks);
   const awayScoreInput = renderScoreInput(match, "away", score.away ?? "", scoreInputDisabled, unlockableInMyPicks);
+  const scorePenaltySummary = readOnlyScores ? renderPenaltySummary(score, resolvedTeams, "score-penalty-summary") : "";
   const overrideControl = renderOverrideControl(match, readOnlyScores, isOverridden);
   const advancerPicker = renderAdvancerPicker(match, resolvedTeams, score, scoreInputDisabled, readOnlyScores);
   const officialResult = isOfficialScoreMode() ? "" : renderOfficialResult(match, resolvedTeams);
@@ -846,6 +847,7 @@ function renderMatch(match) {
           ${homeScoreInput}
           <span class="score-separator">:</span>
           ${awayScoreInput}
+          ${scorePenaltySummary}
         </div>
         ${renderTeam(resolvedTeams.away.team, resolvedTeams.away.label, "away")}
       </div>
@@ -882,8 +884,8 @@ function getPickRewardResult(match) {
     };
   }
 
-  const pickOutcome = getOfficialOutcome(pickHome, pickAway);
-  const officialOutcome = getOfficialOutcome(official.home, official.away);
+  const pickOutcome = getPickOutcome(match, pickHome, pickAway);
+  const officialOutcome = getOfficialOutcome(official);
   if (pickOutcome === officialOutcome) {
     return {
       type: "result",
@@ -1062,11 +1064,12 @@ function renderOfficialResult(match, resolvedTeams) {
   const awayName = resolvedTeams.away.team?.name || resolvedTeams.away.label || "Away";
   const homeShort = resolvedTeams.home.team?.fifaCode || getShortTeamLabel(homeName);
   const awayShort = resolvedTeams.away.team?.fifaCode || getShortTeamLabel(awayName);
-  const outcome = getOfficialOutcome(official.home, official.away);
+  const outcome = getOfficialOutcome(official);
   const homeBadge = outcome === "draw" ? "D" : outcome === "home" ? "W" : "L";
   const awayBadge = outcome === "draw" ? "D" : outcome === "away" ? "W" : "L";
   const homeClass = outcome === "draw" ? "draw" : outcome === "home" ? "win" : "loss";
   const awayClass = outcome === "draw" ? "draw" : outcome === "away" ? "win" : "loss";
+  const penaltySummary = renderPenaltySummary(official, resolvedTeams, "official-penalty-summary");
 
   return `
     <div class="official-result" aria-live="polite">
@@ -1086,11 +1089,63 @@ function renderOfficialResult(match, resolvedTeams) {
           <span class="official-badge ${awayClass}" aria-label="${awayBadge}">${awayBadge}</span>
         </span>
       </div>
+      ${penaltySummary}
     </div>
   `;
 }
 
-function getOfficialOutcome(homeScore, awayScore) {
+function renderPenaltySummary(score, resolvedTeams, className) {
+  if (!hasPenaltyShootout(score)) return "";
+
+  const winnerSide = getPenaltyWinnerSide(score);
+  const winnerName = winnerSide === "home"
+    ? resolvedTeams.home.team?.name || resolvedTeams.home.label || "Home"
+    : winnerSide === "away"
+      ? resolvedTeams.away.team?.name || resolvedTeams.away.label || "Away"
+      : "Winner";
+
+  return `
+    <div class="${className}" title="${escapeHTML(winnerName)} won on penalties">
+      <span class="penalty-label">Pens</span>
+      <span class="penalty-score">${score.homePenalty} - ${score.awayPenalty}</span>
+    </div>
+  `;
+}
+
+function hasPenaltyShootout(score) {
+  if (!score) return false;
+  const homePenalty = Number(score.homePenalty);
+  const awayPenalty = Number(score.awayPenalty);
+  return Number.isInteger(homePenalty) &&
+    Number.isInteger(awayPenalty) &&
+    homePenalty >= 0 &&
+    awayPenalty >= 0 &&
+    (homePenalty > 0 || awayPenalty > 0);
+}
+
+function getPenaltyWinnerSide(score) {
+  if (!hasPenaltyShootout(score)) return null;
+  if (score.homePenalty > score.awayPenalty) return "home";
+  if (score.awayPenalty > score.homePenalty) return "away";
+  return null;
+}
+
+function getPickOutcome(match, homeScore, awayScore) {
+  if (homeScore > awayScore) return "home";
+  if (awayScore > homeScore) return "away";
+  if (match.stageId !== 1) {
+    const selectedAdvancer = state.advancers[match.id];
+    if (selectedAdvancer === "home" || selectedAdvancer === "away") return selectedAdvancer;
+  }
+  return "draw";
+}
+
+function getOfficialOutcome(score) {
+  if (!score) return "draw";
+  if (score.winnerSide === "home" || score.winnerSide === "away") return score.winnerSide;
+
+  const homeScore = Number(score.home);
+  const awayScore = Number(score.away);
   if (homeScore > awayScore) return "home";
   if (awayScore > homeScore) return "away";
   return "draw";
@@ -1306,7 +1361,7 @@ function getKnockoutOutcome(matchNumber, visited = new Set()) {
   if (scoreWinner === "home") return { winner: resolvedTeams.home.team, loser: resolvedTeams.away.team };
   if (scoreWinner === "away") return { winner: resolvedTeams.away.team, loser: resolvedTeams.home.team };
 
-  if (isOfficialScoreMode() && scoreWinner === "tie") {
+  if (isOfficialScoreMode() && (scoreWinner === "tie" || scoreWinner === null)) {
     if (score?.winnerSide === "home") return { winner: resolvedTeams.home.team, loser: resolvedTeams.away.team };
     if (score?.winnerSide === "away") return { winner: resolvedTeams.away.team, loser: resolvedTeams.home.team };
   }
@@ -1322,6 +1377,7 @@ function getKnockoutOutcome(matchNumber, visited = new Set()) {
 
 function getScoreWinnerSide(score) {
   if (!isCompleteScore(score)) return null;
+  if (score.winnerSide === "home" || score.winnerSide === "away") return score.winnerSide;
 
   const homeGoals = Number(score.home);
   const awayGoals = Number(score.away);
@@ -1504,9 +1560,13 @@ function normalizeOfficialResults(results) {
     if (!Number.isInteger(away) || away < 0) return;
 
     const winnerSide = value?.winnerSide === "home" || value?.winnerSide === "away" ? value.winnerSide : null;
+    const homePenalty = toOptionalInteger(value?.homePenalty ?? value?.homePenaltyScore);
+    const awayPenalty = toOptionalInteger(value?.awayPenalty ?? value?.awayPenaltyScore);
     normalized[numberKey] = {
       home,
       away,
+      homePenalty,
+      awayPenalty,
       winnerSide,
       fifaStatus: typeof value?.fifaStatus === "string" ? value.fifaStatus : null,
       fifaPeriod: typeof value?.fifaPeriod === "string" ? value.fifaPeriod : null,
@@ -1516,6 +1576,12 @@ function normalizeOfficialResults(results) {
   });
 
   return normalized;
+}
+
+function toOptionalInteger(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 0 ? number : null;
 }
 
 function getActiveScore(match) {

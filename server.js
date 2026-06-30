@@ -676,6 +676,8 @@ function applyFifaResults(resultsPayload, matches, triggeredBy) {
     const next = {
       home: normalized.home,
       away: normalized.away,
+      homePenalty: normalized.homePenalty,
+      awayPenalty: normalized.awayPenalty,
       source: FIFA_SOURCE,
       fifaMatchId: normalized.fifaMatchId,
       winnerSide: normalized.winnerSide,
@@ -749,7 +751,9 @@ function getLatestSyncedFifaMatch(matches) {
       homeAbbr: match.homeSquadAbbr || null,
       awayAbbr: match.awaySquadAbbr || null,
       homeScore: Number.isInteger(Number(match.homeScore)) ? Number(match.homeScore) : null,
-      awayScore: Number.isInteger(Number(match.awayScore)) ? Number(match.awayScore) : null
+      awayScore: Number.isInteger(Number(match.awayScore)) ? Number(match.awayScore) : null,
+      homePenaltyScore: Number.isInteger(Number(match.homePenaltyScore)) ? Number(match.homePenaltyScore) : null,
+      awayPenaltyScore: Number.isInteger(Number(match.awayPenaltyScore)) ? Number(match.awayPenaltyScore) : null
     }))
     .filter((match) => Number.isInteger(match.matchNumber) && match.homeScore !== null && match.awayScore !== null)
     .sort((a, b) => b.timestamp - a.timestamp || b.matchNumber - a.matchNumber)[0] || null;
@@ -759,7 +763,10 @@ function formatFifaSyncLogMatch(match) {
   if (!match) return "none";
   const home = match.homeAbbr || match.homeName;
   const away = match.awayAbbr || match.awayName;
-  return `Match ${match.matchNumber} ${home} ${match.homeScore}-${match.awayScore} ${away} (${match.status})`;
+  const penalties = match.homePenaltyScore !== null && match.awayPenaltyScore !== null && (match.homePenaltyScore > 0 || match.awayPenaltyScore > 0)
+    ? ` pens ${match.homePenaltyScore}-${match.awayPenaltyScore}`
+    : "";
+  return `Match ${match.matchNumber} ${home} ${match.homeScore}-${match.awayScore}${penalties} ${away} (${match.status})`;
 }
 
 function normalizeFifaScoredResult(match) {
@@ -767,6 +774,8 @@ function normalizeFifaScoredResult(match) {
   const fifaMatchId = Number(match.id);
   const home = Number(match.homeScore);
   const away = Number(match.awayScore);
+  const homePenalty = toOptionalScore(match.homePenaltyScore);
+  const awayPenalty = toOptionalScore(match.awayPenaltyScore);
   if (!Number.isInteger(matchNumber) || matchNumber <= 0) return null;
   if (!Number.isInteger(fifaMatchId) || fifaMatchId <= 0) return null;
   if (!Number.isInteger(home) || home < 0) return null;
@@ -777,7 +786,9 @@ function normalizeFifaScoredResult(match) {
     fifaMatchId,
     home,
     away,
-    winnerSide: getScoreWinnerSide(home, away)
+    homePenalty,
+    awayPenalty,
+    winnerSide: getScoreWinnerSide(home, away, homePenalty, awayPenalty)
   };
 }
 
@@ -800,9 +811,11 @@ function normalizeFifaLiveMatch(match) {
   };
 }
 
-function getScoreWinnerSide(home, away) {
+function getScoreWinnerSide(home, away, homePenalty = null, awayPenalty = null) {
   if (home > away) return "home";
   if (away > home) return "away";
+  if (homePenalty !== null && awayPenalty !== null && homePenalty > awayPenalty) return "home";
+  if (homePenalty !== null && awayPenalty !== null && awayPenalty > homePenalty) return "away";
   return null;
 }
 
@@ -810,6 +823,8 @@ function isSameFifaResult(current, next) {
   return current.source === FIFA_SOURCE &&
     current.home === next.home &&
     current.away === next.away &&
+    (current.homePenalty ?? null) === (next.homePenalty ?? null) &&
+    (current.awayPenalty ?? null) === (next.awayPenalty ?? null) &&
     (current.fifaMatchId ?? null) === (next.fifaMatchId ?? null) &&
     (current.winnerSide || null) === (next.winnerSide || null) &&
     (current.fifaStatus || null) === (next.fifaStatus || null) &&
@@ -912,6 +927,11 @@ function toScore(value) {
   if (typeof value === "number" && Number.isInteger(value) && value >= 0) return value;
   if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
   return null;
+}
+
+function toOptionalScore(value) {
+  if (value === null || value === undefined || value === "") return null;
+  return toScore(value);
 }
 
 function parsePositiveInteger(value, fallback, minimum) {
